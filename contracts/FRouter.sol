@@ -9,7 +9,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 
 import "./FFactory.sol";
 import "./IFPair.sol";
-import "../tax/IBondingTax.sol";
+// import "../tax/IBondingTax.sol";
 
 contract FRouter is
     Initializable,
@@ -45,39 +45,37 @@ contract FRouter is
         assetToken = assetToken_;
     }
 
+    // Calculates the expected output when swapping assetToken for token
+    // To calculate the expected output when swapping token for assetToken, pass address(0) as assetToken_
     function getAmountsOut(
-        address token,
-        address assetToken_,
+        address inputToken,
+        address outputToken,
         uint256 amountIn
-    ) public view returns (uint256 _amountOut) {
-        require(token != address(0), "Zero addresses are not allowed.");
+    ) public view returns (uint256 amountOut) {
+        require(inputToken != address(0) && outputToken != address(0), "Zero addresses are not allowed.");
+        require(inputToken != outputToken, "Tokens must be different.");
 
-        address pairAddress = factory.getPair(token, assetToken);
-
+        address pairAddress = factory.getPair(inputToken, outputToken);
         IFPair pair = IFPair(pairAddress);
 
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
-
         uint256 k = pair.kLast();
 
-        uint256 amountOut;
-
-        if (assetToken_ == assetToken) {
-            uint256 newReserveB = reserveB + amountIn;
-
-            uint256 newReserveA = k / newReserveB;
-
-            amountOut = reserveA - newReserveA;
-        } else {
+        if (inputToken == assetToken) {
+            // Selling assetToken to get another token
             uint256 newReserveA = reserveA + amountIn;
-
             uint256 newReserveB = k / newReserveA;
-
             amountOut = reserveB - newReserveB;
+        } else {
+            // Selling a token to get assetToken
+            uint256 newReserveB = reserveB + amountIn;
+            uint256 newReserveA = k / newReserveB;
+            amountOut = reserveA - newReserveA;
         }
 
         return amountOut;
     }
+
 
     function addInitialLiquidity(
         address token_,
@@ -113,7 +111,7 @@ contract FRouter is
 
         IERC20 token = IERC20(tokenAddress);
 
-        uint256 amountOut = getAmountsOut(tokenAddress, address(0), amountIn);
+        uint256 amountOut = getAmountsOut(tokenAddress, assetToken, amountIn);
 
         token.safeTransferFrom(to, pairAddress, amountIn);
 
@@ -123,14 +121,15 @@ contract FRouter is
         uint256 amount = amountOut - txFee;
         address feeTo = factory.taxVault();
 
+        pair.approval(address(this), assetToken, amountOut);
         pair.transferAsset(to, amount);
         pair.transferAsset(feeTo, txFee);
 
         pair.swap(amountIn, 0, 0, amountOut);
 
-        if (feeTo == taxManager) {
-            IBondingTax(taxManager).swapForAsset();
-        }
+        // if (feeTo == taxManager) {
+        //     IBondingTax(taxManager).swapForAsset();
+        // }
 
         return (amountIn, amountOut);
     }
@@ -151,7 +150,7 @@ contract FRouter is
         address feeTo = factory.taxVault();
 
         uint256 amount = amountIn - txFee;
-
+        
         IERC20(assetToken).safeTransferFrom(to, pair, amount);
 
         IERC20(assetToken).safeTransferFrom(to, feeTo, txFee);
@@ -162,9 +161,9 @@ contract FRouter is
 
         IFPair(pair).swap(0, amountOut, amount, 0);
 
-        if (feeTo == taxManager) {
-            IBondingTax(taxManager).swapForAsset();
-        }
+        // if (feeTo == taxManager) {
+        //     IBondingTax(taxManager).swapForAsset();
+        // }
 
         return (amount, amountOut);
     }

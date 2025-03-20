@@ -9,11 +9,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
+import "hardhat/console.sol";
+
 import "./FFactory.sol";
 import "./IFPair.sol";
 import "./FRouter.sol";
 import "./FERC20.sol";
-import "../virtualPersona/IAgentFactoryV3.sol";
+// import "../virtualPersona/IAgentFactoryV3.sol";
 
 contract Bonding is
     Initializable,
@@ -421,38 +423,38 @@ contract Bonding is
 
         router.graduate(tokenAddress);
 
-        IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
-        uint256 id = IAgentFactoryV3(agentFactory).initFromBondingCurve(
-            string.concat(_token.data._name, " by Virtuals"),
-            _token.data.ticker,
-            _token.cores,
-            _deployParams.tbaSalt,
-            _deployParams.tbaImplementation,
-            _deployParams.daoVotingPeriod,
-            _deployParams.daoThreshold,
-            assetBalance,
-            _token.creator
-        );
+        // IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
+        // uint256 id = IAgentFactoryV3(agentFactory).initFromBondingCurve(
+        //     string.concat(_token.data._name, " by Virtuals"),
+        //     _token.data.ticker,
+        //     _token.cores,
+        //     _deployParams.tbaSalt,
+        //     _deployParams.tbaImplementation,
+        //     _deployParams.daoVotingPeriod,
+        //     _deployParams.daoThreshold,
+        //     assetBalance,
+        //     _token.creator
+        // );
 
-        address agentToken = IAgentFactoryV3(agentFactory)
-            .executeBondingCurveApplication(
-                id,
-                _token.data.supply / (10 ** token_.decimals()),
-                tokenBalance / (10 ** token_.decimals()),
-                pairAddress
-            );
-        _token.agentToken = agentToken;
+        // address agentToken = IAgentFactoryV3(agentFactory)
+        //     .executeBondingCurveApplication(
+        //         id,
+        //         _token.data.supply / (10 ** token_.decimals()),
+        //         tokenBalance / (10 ** token_.decimals()),
+        //         pairAddress
+        //     );
+        // _token.agentToken = agentToken;
 
-        router.approval(
-            pairAddress,
-            agentToken,
-            address(this),
-            IERC20(agentToken).balanceOf(pairAddress)
-        );
+        // router.approval(
+        //     pairAddress,
+        //     agentToken,
+        //     address(this),
+        //     IERC20(agentToken).balanceOf(pairAddress)
+        // );
 
-        token_.burnFrom(pairAddress, tokenBalance);
+        // token_.burnFrom(pairAddress, tokenBalance);
 
-        emit Graduated(tokenAddress, agentToken);
+        // emit Graduated(tokenAddress, agentToken);
     }
 
     function unwrapToken(
