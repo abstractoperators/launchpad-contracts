@@ -17,7 +17,6 @@ contract FPair is IFPair, ReentrancyGuard {
     struct Pool {
         uint256 reserve0;
         uint256 reserve1;
-        uint256 k;
         uint256 lastUpdated;
     }
 
@@ -56,7 +55,6 @@ contract FPair is IFPair, ReentrancyGuard {
         _pool = Pool({
             reserve0: reserve0,
             reserve1: reserve1,
-            k: reserve0 * reserve1,
             lastUpdated: block.timestamp
         });
 
@@ -77,7 +75,6 @@ contract FPair is IFPair, ReentrancyGuard {
         _pool = Pool({
             reserve0: _reserve0,
             reserve1: _reserve1,
-            k: _pool.k,
             lastUpdated: block.timestamp
         });
 
@@ -118,10 +115,6 @@ contract FPair is IFPair, ReentrancyGuard {
 
     function getReserves() public view returns (uint256, uint256) {
         return (_pool.reserve0, _pool.reserve1);
-    }
-
-    function kLast() public view returns (uint256) {
-        return _pool.k;
     }
 
     function priceALast() public view returns (uint256) {

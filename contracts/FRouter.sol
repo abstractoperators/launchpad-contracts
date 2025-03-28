@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
+import "hardhat/console.sol";
+
 import "./FFactory.sol";
 import "./IFPair.sol";
 // import "../tax/IBondingTax.sol";
@@ -22,7 +24,6 @@ contract FRouter is
     bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
 
     FFactory public factory;
-    address public assetToken;
     address public taxManager;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -31,22 +32,18 @@ contract FRouter is
     }
 
     function initialize(
-        address factory_,
-        address assetToken_
+        address factory_
     ) external initializer {
         __ReentrancyGuard_init();
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
 
         require(factory_ != address(0), "Zero addresses are not allowed.");
-        require(assetToken_ != address(0), "Zero addresses are not allowed.");
 
         factory = FFactory(factory_);
-        assetToken = assetToken_;
     }
 
-    // Calculates the expected output when swapping assetToken for token
-    // To calculate the expected output when swapping token for assetToken, pass address(0) as assetToken_
+    // Calculates the expected output when swapping inputToken for outputToken
     function getAmountsOut(
         address inputToken,
         address outputToken,
@@ -59,19 +56,25 @@ contract FRouter is
         IFPair pair = IFPair(pairAddress);
 
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
-        uint256 k = pair.kLast();
 
-        if (inputToken == assetToken) {
-            // Selling assetToken to get another token
-            uint256 newReserveA = reserveA + amountIn;
-            uint256 newReserveB = k / newReserveA;
-            amountOut = reserveB - newReserveB;
+        // Determine which token corresponds to reserve0/reserve1
+        address tokenA = pair.tokenA();
+        address tokenB = pair.tokenB();
+
+        uint256 reserveIn;
+        uint256 reserveOut;
+
+        if (inputToken == tokenA && outputToken == tokenB) {
+            reserveIn = reserveA;
+            reserveOut = reserveB;
+        } else if (inputToken == tokenB && outputToken == tokenA) {
+            reserveIn = reserveB;
+            reserveOut = reserveA;
         } else {
-            // Selling a token to get assetToken
-            uint256 newReserveB = reserveB + amountIn;
-            uint256 newReserveA = k / newReserveB;
-            amountOut = reserveA - newReserveA;
+            revert("Invalid token pair");
         }
+
+        amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
 
         return amountOut;
     }
@@ -79,6 +82,7 @@ contract FRouter is
 
     function addInitialLiquidity(
         address token_,
+        address assetToken,
         uint256 amountToken_,
         uint256 amountAsset_
     ) public onlyRole(EXECUTOR_ROLE) returns (uint256, uint256) {
@@ -97,11 +101,13 @@ contract FRouter is
         return (amountToken_, amountAsset_);
     }
 
+    // Sell token at tokenAddress for assetToken
     function sell(
         uint256 amountIn,
         address tokenAddress,
+        address assetToken,
         address to
-    ) public nonReentrant onlyRole(EXECUTOR_ROLE) returns (uint256, uint256) {
+    ) public nonReentrant onlyRole(EXECUTOR_ROLE) returns (uint256, uint256, uint256) {
         require(tokenAddress != address(0), "Zero addresses are not allowed.");
         require(to != address(0), "Zero addresses are not allowed.");
 
@@ -113,16 +119,15 @@ contract FRouter is
 
         uint256 amountOut = getAmountsOut(tokenAddress, assetToken, amountIn);
 
-        token.safeTransferFrom(to, pairAddress, amountIn);
+        token.safeTransferFrom(msg.sender, pairAddress, amountIn);
 
         uint fee = factory.sellTax();
         uint256 txFee = (fee * amountOut) / 100;
 
-        uint256 amount = amountOut - txFee;
+        uint256 amountReceived = amountOut - txFee;
         address feeTo = factory.taxVault();
 
-        pair.approval(address(this), assetToken, amountOut);
-        pair.transferAsset(to, amount);
+        pair.transferAsset(to, amountReceived);
         pair.transferAsset(feeTo, txFee);
 
         pair.swap(amountIn, 0, 0, amountOut);
@@ -131,12 +136,13 @@ contract FRouter is
         //     IBondingTax(taxManager).swapForAsset();
         // }
 
-        return (amountIn, amountOut);
+        return (amountIn, amountOut, amountReceived);
     }
 
     function buy(
         uint256 amountIn,
         address tokenAddress,
+        address assetToken,
         address to
     ) public onlyRole(EXECUTOR_ROLE) nonReentrant returns (uint256, uint256) {
         require(tokenAddress != address(0), "Zero addresses are not allowed.");
@@ -151,11 +157,11 @@ contract FRouter is
 
         uint256 amount = amountIn - txFee;
         
-        IERC20(assetToken).safeTransferFrom(to, pair, amount);
+        IERC20(assetToken).safeTransferFrom(msg.sender, pair, amount);
 
-        IERC20(assetToken).safeTransferFrom(to, feeTo, txFee);
+        IERC20(assetToken).safeTransferFrom(msg.sender, feeTo, txFee);
 
-        uint256 amountOut = getAmountsOut(tokenAddress, assetToken, amount);
+        uint256 amountOut = getAmountsOut(assetToken, tokenAddress, amount);
 
         IFPair(pair).transferTo(to, amountOut);
 
@@ -168,13 +174,20 @@ contract FRouter is
         return (amount, amountOut);
     }
 
-    function graduate(
-        address tokenAddress
-    ) public onlyRole(EXECUTOR_ROLE) nonReentrant {
+    // Empties out the pool by transferring all balances to the sender.
+    function emptyPool(
+        address tokenAddress,
+        address assetToken
+    ) public onlyRole(EXECUTOR_ROLE) nonReentrant returns (uint256, uint256) {
         require(tokenAddress != address(0), "Zero addresses are not allowed.");
         address pair = factory.getPair(tokenAddress, assetToken);
         uint256 assetBalance = IFPair(pair).assetBalance();
-        FPair(pair).transferAsset(msg.sender, assetBalance);
+        uint256 tokenBalance = IFPair(pair).balance();
+
+        IFPair(pair).transferAsset(msg.sender, assetBalance);
+        IFPair(pair).transferTo(msg.sender, tokenBalance);
+
+        return (tokenBalance, assetBalance);
     }
 
     function approval(

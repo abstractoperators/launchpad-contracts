@@ -69,6 +69,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         return address(pair_);
     }
 
+    // TokenA should always be the new token and tokenB should be the assetToken
     function createPair(
         address tokenA,
         address tokenB

@@ -9,13 +9,16 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
+import "./interfaces/IDragonswapFactory.sol";
+import "./interfaces/IDragonswapRouter.sol";
+
 import "hardhat/console.sol";
 
 import "./FFactory.sol";
 import "./IFPair.sol";
 import "./FRouter.sol";
 import "./FERC20.sol";
-// import "../virtualPersona/IAgentFactoryV3.sol";
+import "./WSEI.sol";
 
 contract Bonding is
     Initializable,
@@ -28,13 +31,18 @@ contract Bonding is
 
     FFactory public factory;
     FRouter public router;
+    WSEI public wsei;
+    IDragonswapFactory public dragonswapFactory;
+    IDragonswapRouter public dragonswapRouter;
+
     uint256 public initialSupply;
-    uint256 public fee;
+    uint256 public assetLaunchFee;
+    uint256 public seiLaunchFee;
     uint256 public constant K = 3_000_000_000_000;
     uint256 public assetRate;
     uint256 public gradThreshold;
     uint256 public maxTx;
-    address public agentFactory;
+
     struct Profile {
         address user;
         address[] tokens;
@@ -44,17 +52,9 @@ contract Bonding is
         address creator;
         address token;
         address pair;
-        address agentToken;
         Data data;
-        string description;
-        uint8[] cores;
-        string image;
-        string twitter;
-        string telegram;
-        string youtube;
-        string website;
         bool trading;
-        bool tradingOnUniswap;
+        bool tradingOnDragonswap;
     }
 
     struct Data {
@@ -89,38 +89,46 @@ contract Bonding is
 
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
-    event Graduated(address indexed token, address agentToken);
+    event Graduated(address indexed token, address indexed pair);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
-
+    
+    receive() external payable {}
+    
     function initialize(
         address factory_,
         address router_,
+        address payable wsei_,
         address feeTo_,
-        uint256 fee_,
+        uint256 assetLaunchFee_,
+        uint256 seiLaunchFee_,
         uint256 initialSupply_,
         uint256 assetRate_,
         uint256 maxTx_,
-        address agentFactory_,
-        uint256 gradThreshold_
+        uint256 gradThreshold_,
+        address dragonswapFactory_,
+        address dragonswapRouter_
     ) external initializer {
-        __Ownable_init(msg.sender);
         __ReentrancyGuard_init();
+        __Ownable_init(msg.sender);
 
         factory = FFactory(factory_);
         router = FRouter(router_);
+        wsei = WSEI(wsei_);
 
         _feeTo = feeTo_;
-        fee = (fee_ * 1 ether) / 1000;
+        assetLaunchFee = assetLaunchFee_;
+        seiLaunchFee = seiLaunchFee_;
 
         initialSupply = initialSupply_;
         assetRate = assetRate_;
         maxTx = maxTx_;
 
-        agentFactory = agentFactory_;
+        dragonswapFactory = IDragonswapFactory(dragonswapFactory_);
+        dragonswapRouter = IDragonswapRouter(dragonswapRouter_);
         gradThreshold = gradThreshold_;
     }
 
@@ -158,8 +166,13 @@ contract Bonding is
         gradThreshold = newThreshold;
     }
 
-    function setFee(uint256 newFee, address newFeeTo) public onlyOwner {
-        fee = newFee;
+    function setAssetLaunchFee(uint256 newFee, address newFeeTo) public onlyOwner {
+        assetLaunchFee = newFee;
+        _feeTo = newFeeTo;
+    }
+
+    function setSeiLaunchFee(uint256 newFee, address newFeeTo) public onlyOwner {
+        seiLaunchFee = newFee;
         _feeTo = newFeeTo;
     }
 
@@ -187,33 +200,34 @@ contract Bonding is
         return _profile.tokens;
     }
 
-    function launch(
+    // Handles the transfer of tokens from user to itself, as well as fees, then launches the token
+    function launchWithAsset(
         string memory _name,
         string memory _ticker,
-        uint8[] memory cores,
-        string memory desc,
-        string memory img,
-        string[4] memory urls,
-        uint256 purchaseAmount
+        uint256 purchaseAmount,
+        address assetToken
     ) public nonReentrant returns (address, address, uint) {
         require(
-            purchaseAmount > fee,
+            purchaseAmount > assetLaunchFee,
             "Purchase amount must be greater than fee"
         );
-        address assetToken = router.assetToken();
         require(
             IERC20(assetToken).balanceOf(msg.sender) >= purchaseAmount,
             "Insufficient amount"
         );
-        uint256 initialPurchase = (purchaseAmount - fee);
-        IERC20(assetToken).safeTransferFrom(msg.sender, _feeTo, fee);
+        uint256 initialPurchase = (purchaseAmount - assetLaunchFee);
+        IERC20(assetToken).safeTransferFrom(msg.sender, _feeTo, assetLaunchFee);
         IERC20(assetToken).safeTransferFrom(
             msg.sender,
             address(this),
             initialPurchase
         );
 
-        FERC20 token = new FERC20(string.concat("fun ", _name), _ticker, initialSupply, maxTx);
+        return _launch(_name, _ticker, assetToken, initialPurchase);       
+    }
+
+    function _launch(string memory _name, string memory _ticker, address assetToken, uint256 initialPurchase) private returns (address, address, uint) {
+        FERC20 token = new FERC20(_name, _ticker, initialSupply, maxTx);
         uint256 supply = token.totalSupply();
 
         address _pair = factory.createPair(address(token), assetToken);
@@ -224,11 +238,11 @@ contract Bonding is
         uint256 k = ((K * 10000) / assetRate);
         uint256 liquidity = (((k * 10000 ether) / supply) * 1 ether) / 10000;
 
-        router.addInitialLiquidity(address(token), supply, liquidity);
+        router.addInitialLiquidity(address(token), assetToken, supply, liquidity);
 
         Data memory _data = Data({
             token: address(token),
-            name: string.concat("fun ", _name),
+            name: string.concat("aiden ", _name),
             _name: _name,
             ticker: _ticker,
             supply: supply,
@@ -240,22 +254,16 @@ contract Bonding is
             prevPrice: supply / liquidity,
             lastUpdated: block.timestamp
         });
+
         Token memory tmpToken = Token({
             creator: msg.sender,
             token: address(token),
-            agentToken: address(0),
             pair: _pair,
             data: _data,
-            description: desc,
-            cores: cores,
-            image: img,
-            twitter: urls[0],
-            telegram: urls[1],
-            youtube: urls[2],
-            website: urls[3],
             trading: true, // Can only be traded once creator made initial purchase
-            tradingOnUniswap: false
+            tradingOnDragonswap: false
         });
+
         tokenInfo[address(token)] = tmpToken;
         tokenInfos.push(address(token));
 
@@ -281,31 +289,54 @@ contract Bonding is
 
         // Make initial purchase
         IERC20(assetToken).forceApprove(address(router), initialPurchase);
-        router.buy(initialPurchase, address(token), address(this));
+        router.buy(initialPurchase, address(token), assetToken, address(this));
         token.transfer(msg.sender, token.balanceOf(address(this)));
 
         return (address(token), _pair, n);
     }
 
+    function sellForAsset(
+        uint256 amountIn,
+        address tokenAddress,
+        address assetToken
+    ) public returns (uint256 amountReceived) {
+        require(assetToken != address(wsei), "Call sellForSEI for dealing with wsei");
+        return sell(amountIn, tokenAddress, assetToken);
+    }
+
     function sell(
         uint256 amountIn,
-        address tokenAddress
-    ) public returns (bool) {
+        address tokenAddress,
+        address assetToken
+    ) private returns (uint256 amountReceived) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
         address pairAddress = factory.getPair(
             tokenAddress,
-            router.assetToken()
+            assetToken
         );
 
         IFPair pair = IFPair(pairAddress);
 
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
 
-        (uint256 amount0In, uint256 amount1Out) = router.sell(
+        FERC20(tokenAddress).transferFrom(msg.sender, address(this), amountIn);
+        FERC20(tokenAddress).approve(address(router), 0);
+        FERC20(tokenAddress).approve(address(router), amountIn);
+
+        // If assetToken is wsei, the bonding token contract has to convert it back to SEI before sending it back to the user.
+        address recipient;
+        if (assetToken == address(wsei)) {
+            recipient = address(this);
+        } else {
+            recipient = msg.sender;
+        }
+
+        (uint256 amount0In, uint256 amount1Out, uint256 _amountReceived) = router.sell(
             amountIn,
             tokenAddress,
-            msg.sender
+            assetToken,
+            recipient
         );
 
         uint256 newReserveA = reserveA + amount0In;
@@ -337,27 +368,49 @@ contract Bonding is
             tokenInfo[tokenAddress].data.lastUpdated = block.timestamp;
         }
 
-        return true;
+        return _amountReceived;
+    }
+
+    // Transfers asset tokens from user to this contract, then executes the buy
+    function buyWithAsset(
+        uint256 amountIn,
+        address tokenAddress,
+        address assetToken
+    ) public returns (bool) {
+        uint256 currBal = IERC20(assetToken).balanceOf(msg.sender);
+
+        require(currBal >= amountIn, "Insufficient asset token");
+
+        // Transfer assetToken to Bonding contract from user
+        IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        return buy(amountIn, tokenAddress, assetToken);
     }
 
     function buy(
         uint256 amountIn,
-        address tokenAddress
-    ) public payable returns (bool) {
+        address tokenAddress,
+        address assetToken
+    ) private returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
         address pairAddress = factory.getPair(
             tokenAddress,
-            router.assetToken()
+            assetToken
         );
 
         IFPair pair = IFPair(pairAddress);
 
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
 
+        // Approve router to spend asset token on behalf of Bonding
+        IERC20(assetToken).approve(address(router), 0);
+        IERC20(assetToken).approve(address(router), amountIn);
+
         (uint256 amount1In, uint256 amount0Out) = router.buy(
             amountIn,
             tokenAddress,
+            assetToken,
             msg.sender
         );
 
@@ -390,93 +443,109 @@ contract Bonding is
             tokenInfo[tokenAddress].data.lastUpdated = block.timestamp;
         }
 
-        if (newReserveA <= gradThreshold && tokenInfo[tokenAddress].trading) {
-            _openTradingOnUniswap(tokenAddress);
+        // If sufficient SEI has been deposited, graduate this token
+        if (pair.assetBalance() >= gradThreshold && tokenInfo[tokenAddress].trading) {
+            console.log("Launching!");
+            _graduateToken(tokenAddress, assetToken);
         }
 
         return true;
     }
 
-    function _openTradingOnUniswap(address tokenAddress) private {
-        FERC20 token_ = FERC20(tokenAddress);
+    /// @notice Buy a bonding token using SEI
+    function buyWithSEI(address tokenAddress) public payable returns (bool) {
+        require(msg.value > 0, "Must send SEI");
 
-        Token storage _token = tokenInfo[tokenAddress];
+        // Step 1: Wrap SEI into WSEI
+        wsei.deposit{value: msg.value}();
 
-        require(
-            _token.trading && !_token.tradingOnUniswap,
-            "trading is already open"
-        );
+        // Step 2: Approve router to spend WSEI
+        wsei.approve(address(router), msg.value);
 
-        _token.trading = false;
-        _token.tradingOnUniswap = true;
-
-        // Transfer asset tokens to bonding contract
-        address pairAddress = factory.getPair(
-            tokenAddress,
-            router.assetToken()
-        );
-
-        IFPair pair = IFPair(pairAddress);
-
-        uint256 assetBalance = pair.assetBalance();
-        uint256 tokenBalance = pair.balance();
-
-        router.graduate(tokenAddress);
-
-        // IERC20(router.assetToken()).forceApprove(agentFactory, assetBalance);
-        // uint256 id = IAgentFactoryV3(agentFactory).initFromBondingCurve(
-        //     string.concat(_token.data._name, " by Virtuals"),
-        //     _token.data.ticker,
-        //     _token.cores,
-        //     _deployParams.tbaSalt,
-        //     _deployParams.tbaImplementation,
-        //     _deployParams.daoVotingPeriod,
-        //     _deployParams.daoThreshold,
-        //     assetBalance,
-        //     _token.creator
-        // );
-
-        // address agentToken = IAgentFactoryV3(agentFactory)
-        //     .executeBondingCurveApplication(
-        //         id,
-        //         _token.data.supply / (10 ** token_.decimals()),
-        //         tokenBalance / (10 ** token_.decimals()),
-        //         pairAddress
-        //     );
-        // _token.agentToken = agentToken;
-
-        // router.approval(
-        //     pairAddress,
-        //     agentToken,
-        //     address(this),
-        //     IERC20(agentToken).balanceOf(pairAddress)
-        // );
-
-        // token_.burnFrom(pairAddress, tokenBalance);
-
-        // emit Graduated(tokenAddress, agentToken);
+        // Step 3: Execute existing ERC-20 buy logic
+        return buy(msg.value, tokenAddress, address(wsei));
     }
 
-    function unwrapToken(
-        address srcTokenAddress,
-        address[] memory accounts
-    ) public {
-        Token memory info = tokenInfo[srcTokenAddress];
-        require(info.tradingOnUniswap, "Token is not graduated yet");
+    /// @notice Sell a bonding token and receive SEI
+    function sellForSEI(uint256 amountIn, address tokenAddress) public nonReentrant returns (bool) {
+        require(tokenInfo[tokenAddress].trading, "Token not trading");
 
-        FERC20 token = FERC20(srcTokenAddress);
-        IERC20 agentToken = IERC20(info.agentToken);
-        address pairAddress = factory.getPair(
-            srcTokenAddress,
-            router.assetToken()
+        // Step 1: Approve router to spend user's bonding token
+        FERC20(tokenAddress).forceApprove(address(router), amountIn);
+
+        // Step 2: Perform the sell (sends WSEI to this contract)
+        uint256 amountReceived = sell(amountIn, tokenAddress, address(wsei));
+
+        // Step 3: Unwrap WSEI and send SEI back to user
+        wsei.withdraw(amountReceived);
+
+        payable(msg.sender).transfer(amountReceived);
+
+        return true;
+    }
+
+    /// @notice Launch a bonding token that uses SEI as it's asset pair
+    function launchWithSEI(string memory _name, string memory _ticker) public payable returns (address, address, uint) {
+        require(
+            msg.value > seiLaunchFee,
+            "Purchase amount must be greater than fee"
         );
-        for (uint i = 0; i < accounts.length; i++) {
-            address acc = accounts[i];
-            uint256 balance = token.balanceOf(acc);
-            if (balance > 0) {
-                token.burnFrom(acc, balance);
-                agentToken.transferFrom(pairAddress, acc, balance);
-            }
+        
+        // Step 1: Wrap SEI into WSEI
+        wsei.deposit{value: msg.value}();
+
+        // Step 2: Approve router to spend WSEI
+        wsei.approve(address(router), msg.value);
+
+        uint256 initialPurchase = (msg.value - seiLaunchFee);
+        wsei.transfer(_feeTo, seiLaunchFee);
+
+        // Step 3: Execute existing ERC-20 launch logic
+        return _launch(_name, _ticker, address(wsei), initialPurchase);       
+    }
+
+    function _graduateToken(address tokenAddress, address assetToken) private {
+        Token storage _token = tokenInfo[tokenAddress];
+
+        require(_token.trading && !_token.tradingOnDragonswap, "Already graduated");
+
+        _token.trading = false;
+        _token.tradingOnDragonswap = true;
+
+        // 1. Pull liquidity from bonding pool and deposit into DragonSwap
+
+        // Transfer assets from old pool to this contract
+        (uint256 tokenAmount, uint256 assetAmount) = router.emptyPool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
+
+        console.log("In here");
+        // Approve router
+        IERC20(tokenAddress).approve(address(dragonswapRouter), tokenAmount);
+        IERC20(assetToken).approve(address(dragonswapRouter), assetAmount);
+
+        // If assetToken is sei, swap back for regular sei before depositing to pool
+        address dragonswapAsset;
+        if (assetToken == address(wsei)) {
+            dragonswapAsset = dragonswapRouter.WSEI();
+            wsei.withdraw(assetAmount);
+            // addLiquidity automatically creates the pool if it doesn't exist
+            dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, 0, 0, address(this), block.timestamp + 600);
+        } else {
+            dragonswapAsset = assetToken;
+            // Add liquidity to DragonSwap. This sends an NFT back to this contract that we have to lock up somehow.
+            dragonswapRouter.addLiquidity(
+                tokenAddress,
+                dragonswapAsset,
+                tokenAmount,
+                assetAmount,
+                0, // slippage min
+                0,
+                address(this),
+                block.timestamp + 600
+            );
         }
+
+        address dragonswapPair = dragonswapFactory.getPair(tokenAddress, dragonswapAsset);
+        _token.pair = dragonswapPair;
+        emit Graduated(tokenAddress, dragonswapPair);
     }
 }

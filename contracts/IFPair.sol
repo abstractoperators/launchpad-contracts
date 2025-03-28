@@ -14,14 +14,16 @@ interface IFPair {
 
     function transferTo(address recipient, uint256 amount) external;
 
+    function tokenA() external view returns (address);
+    
+    function tokenB() external view returns (address);
+
     function swap(
         uint256 amount0In,
         uint256 amount0Out,
         uint256 amount1In,
         uint256 amount1Out
     ) external returns (bool);
-
-    function kLast() external view returns (uint256);
 
     function approval(
         address _user,

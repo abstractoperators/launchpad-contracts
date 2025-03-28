@@ -12,6 +12,12 @@ const config: HardhatUserConfig = {
       },
       viaIR: true // Enables the Intermediate Representation optimizer
     }
+  },
+  networks: {
+    testnet: {
+      url: "http://127.0.0.1:8545",
+      chainId: 31337, // This is the ChainID for forked atlantic-2
+    },
   }
 };
 
