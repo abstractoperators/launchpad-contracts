@@ -8,7 +8,7 @@ interface IFPair {
 
     function balance() external view returns (uint256);
 
-    function mint(uint256 reserve0, uint256 reserve1) external returns (bool);
+    function mint() external returns (bool);
 
     function transferAsset(address recipient, uint256 amount) external;
 
@@ -30,4 +30,9 @@ interface IFPair {
         address _token,
         uint256 amount
     ) external returns (bool);
+
+    function getAmountOut(
+        address inputToken,
+        uint256 amountIn
+    ) external view returns (uint256 amountOut);
 }

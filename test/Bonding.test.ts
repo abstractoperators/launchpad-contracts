@@ -21,7 +21,7 @@ describe("Bonding Contract", function () {
     let Bonding: Contract, Factory: Contract, Router: Contract, AssetToken: Contract, WSEI: Contract, DragonswapRouter: Contract, DragonswapFactory: Contract;
     let PairAbi: Interface
 
-    let GraduatedToken: string
+    let GraduatedToken: string, AssetTradedToken: string, AssetTradedPair: string
 
     before(async function () {
         [owner, user, feeRecipient] = await ethers.getSigners();
@@ -91,13 +91,12 @@ describe("Bonding Contract", function () {
             Factory.target,   // factory address
             Router.target,    // router address
             WSEI.target,      // address of WSEI contract that helps us wrap SEI
-            await feeRecipient.getAddress(), // fee recipient
             ethers.parseEther("100"),               // asset launch fee amount
             ethers.parseEther("100"),               // sei launch fee amount
             initialSupply, // initial supply
-            300,             // assetRate
             maxTx, // maximum percentage of each token that can be bought in one tx.
-            gradThreshold, // grad threshold
+            gradThreshold, // sei grad threshold
+            gradThreshold, // asset grad threshold
             dragonswapFactory,
             dragonswapRouter
         );
@@ -115,8 +114,11 @@ describe("Bonding Contract", function () {
         await Bonding.setInitialSupply(ethers.parseEther("1000000000"));
         expect(await Bonding.initialSupply()).to.equal("1000000000000000000000000000");
 
-        await Bonding.setGradThreshold(ethers.parseEther("100000"));
-        expect(await Bonding.gradThreshold()).to.equal("100000000000000000000000");
+        await Bonding.setSeiGradThreshold(ethers.parseEther("100000"));
+        expect(await Bonding.seiGradThreshold()).to.equal("100000000000000000000000");
+
+        await Bonding.setAssetGradThreshold(ethers.parseEther("100000"));
+        expect(await Bonding.assetGradThreshold()).to.equal("100000000000000000000000");
     });
 
     it("should allow owner to set max tx", async function () {
@@ -148,13 +150,14 @@ describe("Bonding Contract", function () {
         await transferResult.wait()
 
         // User approves Bonding contract to spend AssetToken so it can seed the liquidity pool with the initial purchase.
+        const launchFee = await Bonding.assetLaunchFee()
         await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("200"));
 
         // Launch a token
         const tx = await Bonding.connect(user).launchWithAsset(
             "Test Token",
             "TST",
-            ethers.parseEther("200"), // Purchase amount
+            launchFee, // Purchase amount
             AssetToken.target
         );
 
@@ -166,6 +169,14 @@ describe("Bonding Contract", function () {
         expect(events.length).to.be.greaterThan(0);
         expect(events[0].args.token).to.be.properAddress;
         expect(events[0].args.pair).to.be.properAddress;
+
+        AssetTradedToken = events[0].args.token
+        AssetTradedPair = events[0].args.pair
+
+        // Since the input amount is equal to launch fee, the user should receive no token.
+        const tokenContract = await ethers.getContractAt("FERC20", AssetTradedToken, user);
+        const currBal = await tokenContract.balanceOf(await user.getAddress())
+        expect(currBal).to.be.equals(0);
     });
 
     it("should allow a user to buy and sell tokens", async function () {
@@ -181,18 +192,20 @@ describe("Bonding Contract", function () {
         await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("50"));
 
         // Buy token
-        await Bonding.connect(user).buyWithAsset(ethers.parseEther("50"), tokenAddress, AssetToken.target);
+        let oldTokenBal = await AssetToken.balanceOf(await user.getAddress())
+        let buyAmt = ethers.parseEther("50")
+        await Bonding.connect(user).buyWithAsset(buyAmt, tokenAddress, AssetToken.target);
         let newTokenBal = await tokenContract.balanceOf(await user.getAddress())
         expect(newTokenBal).to.be.gt(0);
         let assetTokenBal = await AssetToken.balanceOf(await user.getAddress())
-        expect(assetTokenBal).to.be.equal(0);
+        expect(oldTokenBal - assetTokenBal).to.be.equals(buyAmt);
 
         // Sell token
         // Approve token transfer.
         const tokensToSell = newTokenBal / BigInt(2)
         await tokenContract.connect(user).approve(Bonding.target, tokensToSell);
         await Bonding.connect(user).sellForAsset(tokensToSell, tokenAddress, AssetToken.target);
-        const oldTokenBal = newTokenBal
+        oldTokenBal = newTokenBal
         newTokenBal = await tokenContract.balanceOf(await user.getAddress())
         expect(newTokenBal).to.be.lt(oldTokenBal)
         assetTokenBal = await AssetToken.balanceOf(await user.getAddress())
@@ -290,24 +303,36 @@ describe("Bonding Contract", function () {
 
         expect(finalTokenBal).to.be.lt(newTokenBal);
         expect(endSEIBalance).to.be.gt(midSEIBalance); // SEI received back
-
-        // Optional: log to see real difference
-        console.log("SEI before:", ethers.formatEther(startSEIBalance));
-        console.log("SEI after:", ethers.formatEther(endSEIBalance));
     });
+
+    // Test that fees are deducted on buys and sells
+    it("should deduct fees on launch and tax on buys and sells", async function () {
+        const buyTax = await Factory.buyTax();
+        const taxVault = await Factory.taxVault();
+        await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("100"));
+
+        const pair = await ethers.getContractAt("FPair", AssetTradedPair, user)
+        const before = await pair.assetBalance()
+        const buyAmount = ethers.parseEther("100")
+        const tx = await Bonding.connect(user).buyWithAsset(buyAmount, AssetTradedToken, AssetToken.target);
+        tx.wait();
+
+        const after = await pair.assetBalance()
+
+        console.log("BTax", buyTax)
+        console.log("BuyAmt", buyAmount)
+        console.log("BTBI", buyTax/BigInt(100))
+        // Expect that the amount of tokens deposited into the pool is equal to buyAmount reduced by buyTax percent
+        expect(after - before).to.be.equals(buyAmount * (100n - buyTax) / 100n)
+    })
+
 
     // Test that token graduates and launches pool on Dragonswap once it his threshold
     it("should graduate the token once supply drops below the threshold", async function () {
-        const initialSupply = await Bonding.initialSupply()
-        console.log("IS", initialSupply)
+        const gradThreshold = await Bonding.seiGradThreshold()
 
-        const gradThreshold = await Bonding.gradThreshold()
-        console.log("GT", gradThreshold)
-
-        // Launch and buy an amount so that the remaining supply is just over the graduation threshold
-        const amountToGraduation = ethers.parseEther("5000")
-        const buyAmount = gradThreshold - amountToGraduation
-        console.log("Buying: ", buyAmount)
+        // Launch and buy an amount so that the asset supply is just under the graduation threshold (reduced by fees)
+        const buyAmount = gradThreshold
         const tx = await Bonding.connect(user).launchWithSEI(
             "GraduateToken",
             "GTK",
@@ -315,17 +340,21 @@ describe("Bonding Contract", function () {
                 value: buyAmount
             }
         );
-
+    
         const receipt = await tx.wait();
         const launchedEvent = getLaunchedEvent(receipt)
         GraduatedToken = launchedEvent.args.token as string
         expect(GraduatedToken).to.be.properAddress;
 
         const pair = new ethers.Contract(launchedEvent.args.pair, PairAbi, user)
+        let assetReserve = await pair.assetBalance();
+
+        const oldPrice = await Router.getAmountOut(await WSEI.getAddress(), GraduatedToken, ethers.parseEther("1"))
+        console.log("REST", oldPrice)
 
         // This buy should cross the threshold and trigger the graduation process
         const buyTx = await Bonding.connect(user).buyWithSEI(GraduatedToken, {
-            value: ethers.parseEther("20000"),
+            value: (gradThreshold - assetReserve) * BigInt(2),
         });
         const buyReceipt = await buyTx.wait();
 
@@ -344,13 +373,26 @@ describe("Bonding Contract", function () {
         if (tokenInfo.token != token0 && tokenInfo.token != token1) {
             throw new Error("Token Pool deployed should contain the same token")
         }
+
+        // Check that pair doesn't hold anymore tokens
+        assetReserve = await pair.assetBalance();
+        const tokenReserve = await pair.balance();
+        expect(assetReserve).to.be.equals(0)
+        expect(tokenReserve).to.be.equals(0)
+
+        // Check that price is not trading too differently from the previous price
+        const path = [await DragonswapRouter.WSEI(), GraduatedToken];
+        const amounts = await DragonswapRouter.getAmountsOut(ethers.parseEther("1"), path);
+        const newPrice = amounts[1]; // The result after the swap
+        console.log("RESS", newPrice)
+        expect(oldPrice-newPrice).to.be.lessThan(ethers.parseEther('10'))
     })
 
     // Test that token can no longer be traded on this contract once it is graduated
     it("can no longer be traded via Bonding.sol once graduated", async function () {
         let buySucceeded = false
         try {
-            // This buy should cross the threshold and trigger the graduation process
+            // This buy should fail since the token is no longer trading
             const buyTx = await Bonding.connect(user).buyWithSEI(GraduatedToken, {
                 value: ethers.parseEther("20000"),
             });
@@ -362,21 +404,11 @@ describe("Bonding Contract", function () {
         expect(buySucceeded).to.be.equal(false);
     })
 
-    // Test that liquidity and price on Dragonswap should be exactly the same as on the private AMM
-    it ("should not have a drastic price change after graduation", async function () {
-        const testAmount = ethers.parseEther("1")
-        const oldPrice = await Router.getAmountsOut(await WSEI.getAddress(), GraduatedToken, testAmount)
-        console.log("REST", oldPrice)
-
-        const newPrice = await DragonswapRouter.getAmountOut(testAmount, await DragonswapRouter.WSEI(), GraduatedToken)
-        console.log("RESS", newPrice)
-    })
-
-    // Test that we should only be able to launch some token with either SEI or ASSET
-
     // Test deployment fees
+
 
     // Test taxes on deployed pools?
 
     // Test max tx (max percentage of token that can be bought at once)
+
 });

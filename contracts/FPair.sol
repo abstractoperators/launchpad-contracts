@@ -14,13 +14,7 @@ contract FPair is IFPair, ReentrancyGuard {
     address public tokenA;
     address public tokenB;
 
-    struct Pool {
-        uint256 reserve0;
-        uint256 reserve1;
-        uint256 lastUpdated;
-    }
-
-    Pool private _pool;
+    uint256 private lastUpdated;
 
     constructor(address router_, address token0, address token1) {
         require(router_ != address(0), "Zero addresses are not allowed.");
@@ -46,40 +40,32 @@ contract FPair is IFPair, ReentrancyGuard {
         uint256 amount1Out
     );
 
-    function mint(
-        uint256 reserve0,
-        uint256 reserve1
-    ) public onlyRouter returns (bool) {
-        require(_pool.lastUpdated == 0, "Already minted");
+    // Mint here assumes the assets have been transferred to itself by the router.
+    // It doesn't do anything except emit the Mint event
+    function mint() public onlyRouter returns (bool) {
+        require(lastUpdated == 0, "Already minted");
 
-        _pool = Pool({
-            reserve0: reserve0,
-            reserve1: reserve1,
-            lastUpdated: block.timestamp
-        });
+        uint256 balance0 = IERC20(tokenA).balanceOf(address(this));
+        uint256 balance1 = IERC20(tokenB).balanceOf(address(this));
 
-        emit Mint(reserve0, reserve1);
+        lastUpdated = block.timestamp;
 
+        emit Mint(balance0, balance1);
         return true;
     }
 
+
+    // Swap also doesn't perform any swap, it just emits an event.
+    // It relies on the router calling it to have transferred the funds to it and provide the correct values for the event emitted.
     function swap(
         uint256 amount0In,
         uint256 amount0Out,
         uint256 amount1In,
         uint256 amount1Out
     ) public onlyRouter returns (bool) {
-        uint256 _reserve0 = (_pool.reserve0 + amount0In) - amount0Out;
-        uint256 _reserve1 = (_pool.reserve1 + amount1In) - amount1Out;
-
-        _pool = Pool({
-            reserve0: _reserve0,
-            reserve1: _reserve1,
-            lastUpdated: block.timestamp
-        });
+        lastUpdated = block.timestamp;
 
         emit Swap(amount0In, amount0Out, amount1In, amount1Out);
-
         return true;
     }
 
@@ -114,15 +100,9 @@ contract FPair is IFPair, ReentrancyGuard {
     }
 
     function getReserves() public view returns (uint256, uint256) {
-        return (_pool.reserve0, _pool.reserve1);
-    }
-
-    function priceALast() public view returns (uint256) {
-        return _pool.reserve1 / _pool.reserve0;
-    }
-
-    function priceBLast() public view returns (uint256) {
-        return _pool.reserve0 / _pool.reserve1;
+        uint256 balance0 = IERC20(tokenA).balanceOf(address(this));
+        uint256 balance1 = IERC20(tokenB).balanceOf(address(this));
+        return (balance0, balance1);
     }
 
     function balance() public view returns (uint256) {
@@ -131,5 +111,27 @@ contract FPair is IFPair, ReentrancyGuard {
 
     function assetBalance() public view returns (uint256) {
         return IERC20(tokenB).balanceOf(address(this));
+    }
+
+    function getAmountOut(address inputToken, uint256 amountIn) external view returns (uint256 amountOut) {
+        require(amountIn > 0, "Amount in must be greater than zero");
+
+        uint256 balance0 = IERC20(tokenA).balanceOf(address(this));
+        uint256 balance1 = IERC20(tokenB).balanceOf(address(this));
+
+        uint256 reserveIn;
+        uint256 reserveOut;
+
+        if (inputToken == tokenA) {
+            reserveIn = balance0;
+            reserveOut = balance1;
+        } else if (inputToken == tokenB) {
+            reserveIn = balance1;
+            reserveOut = balance0;
+        } else {
+            revert("Invalid input token");
+        }
+
+        amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
     }
 }

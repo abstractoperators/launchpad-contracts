@@ -11,7 +11,6 @@ import "hardhat/console.sol";
 
 import "./FFactory.sol";
 import "./IFPair.sol";
-// import "../tax/IBondingTax.sol";
 
 contract FRouter is
     Initializable,
@@ -24,7 +23,6 @@ contract FRouter is
     bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
 
     FFactory public factory;
-    address public taxManager;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -44,7 +42,7 @@ contract FRouter is
     }
 
     // Calculates the expected output when swapping inputToken for outputToken
-    function getAmountsOut(
+    function getAmountOut(
         address inputToken,
         address outputToken,
         uint256 amountIn
@@ -55,26 +53,7 @@ contract FRouter is
         address pairAddress = factory.getPair(inputToken, outputToken);
         IFPair pair = IFPair(pairAddress);
 
-        (uint256 reserveA, uint256 reserveB) = pair.getReserves();
-
-        // Determine which token corresponds to reserve0/reserve1
-        address tokenA = pair.tokenA();
-        address tokenB = pair.tokenB();
-
-        uint256 reserveIn;
-        uint256 reserveOut;
-
-        if (inputToken == tokenA && outputToken == tokenB) {
-            reserveIn = reserveA;
-            reserveOut = reserveB;
-        } else if (inputToken == tokenB && outputToken == tokenA) {
-            reserveIn = reserveB;
-            reserveOut = reserveA;
-        } else {
-            revert("Invalid token pair");
-        }
-
-        amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
+        amountOut = pair.getAmountOut(inputToken, amountIn);
 
         return amountOut;
     }
@@ -95,8 +74,9 @@ contract FRouter is
         IERC20 token = IERC20(token_);
 
         token.safeTransferFrom(msg.sender, pairAddress, amountToken_);
+        IERC20(assetToken).safeTransferFrom(msg.sender, pairAddress, amountAsset_);
 
-        pair.mint(amountToken_, amountAsset_);
+        pair.mint();
 
         return (amountToken_, amountAsset_);
     }
@@ -112,29 +92,27 @@ contract FRouter is
         require(to != address(0), "Zero addresses are not allowed.");
 
         address pairAddress = factory.getPair(tokenAddress, assetToken);
-
         IFPair pair = IFPair(pairAddress);
-
         IERC20 token = IERC20(tokenAddress);
 
-        uint256 amountOut = getAmountsOut(tokenAddress, assetToken, amountIn);
+        uint256 amountOut = getAmountOut(tokenAddress, assetToken, amountIn);
 
+        // Send the funds to the pair
         token.safeTransferFrom(msg.sender, pairAddress, amountIn);
 
-        uint fee = factory.sellTax();
-        uint256 txFee = (fee * amountOut) / 100;
-
-        uint256 amountReceived = amountOut - txFee;
+        // Deduct fees from the outputs
+        uint sellTax = factory.sellTax();
+        uint256 sellTaxAmt = (sellTax * amountOut) / 100;
+        uint256 amountReceived = amountOut - sellTaxAmt;
+        
         address feeTo = factory.taxVault();
 
+        // Send outputs to the seller and the fee vault
         pair.transferAsset(to, amountReceived);
-        pair.transferAsset(feeTo, txFee);
+        pair.transferAsset(feeTo, sellTaxAmt);
 
+        // Allow the pair to emit an event (This is a no-op otherwise)
         pair.swap(amountIn, 0, 0, amountOut);
-
-        // if (feeTo == taxManager) {
-        //     IBondingTax(taxManager).swapForAsset();
-        // }
 
         return (amountIn, amountOut, amountReceived);
     }
@@ -151,25 +129,25 @@ contract FRouter is
 
         address pair = factory.getPair(tokenAddress, assetToken);
 
-        uint fee = factory.buyTax();
-        uint256 txFee = (fee * amountIn) / 100;
+        // Calculate the tax to deduct from the input
+        uint buyTax = factory.buyTax();
+        uint256 buyTaxAmt = (buyTax * amountIn) / 100;
         address feeTo = factory.taxVault();
 
-        uint256 amount = amountIn - txFee;
+        uint256 amount = amountIn - buyTaxAmt;
+
+        // Calculate the amountOut based on the current state of the pool
+        uint256 amountOut = getAmountOut(assetToken, tokenAddress, amount);
         
+        // Send fudns to the pool and the tax vault
         IERC20(assetToken).safeTransferFrom(msg.sender, pair, amount);
+        IERC20(assetToken).safeTransferFrom(msg.sender, feeTo, buyTaxAmt);
 
-        IERC20(assetToken).safeTransferFrom(msg.sender, feeTo, txFee);
-
-        uint256 amountOut = getAmountsOut(assetToken, tokenAddress, amount);
-
+        // Send the tokens to the buyer
         IFPair(pair).transferTo(to, amountOut);
 
+        // Emit an event on the pool (This is a no-op otherwise)
         IFPair(pair).swap(0, amountOut, amount, 0);
-
-        // if (feeTo == taxManager) {
-        //     IBondingTax(taxManager).swapForAsset();
-        // }
 
         return (amount, amountOut);
     }
@@ -199,9 +177,5 @@ contract FRouter is
         require(spender != address(0), "Zero addresses are not allowed.");
 
         IFPair(pair).approval(spender, asset, amount);
-    }
-
-    function setTaxManager(address newManager) public onlyRole(ADMIN_ROLE) {
-        taxManager = newManager;
     }
 }

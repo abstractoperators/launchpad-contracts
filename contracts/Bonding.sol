@@ -27,8 +27,6 @@ contract Bonding is
 {
     using SafeERC20 for IERC20;
 
-    address private _feeTo;
-
     FFactory public factory;
     FRouter public router;
     WSEI public wsei;
@@ -39,8 +37,8 @@ contract Bonding is
     uint256 public assetLaunchFee;
     uint256 public seiLaunchFee;
     uint256 public constant K = 3_000_000_000_000;
-    uint256 public assetRate;
-    uint256 public gradThreshold;
+    uint256 public seiGradThreshold;
+    uint256 public assetGradThreshold;
     uint256 public maxTx;
 
     struct Profile {
@@ -102,13 +100,12 @@ contract Bonding is
         address factory_,
         address router_,
         address payable wsei_,
-        address feeTo_,
         uint256 assetLaunchFee_,
         uint256 seiLaunchFee_,
         uint256 initialSupply_,
-        uint256 assetRate_,
         uint256 maxTx_,
-        uint256 gradThreshold_,
+        uint256 seiGradThreshold_,
+        uint256 assetGradThreshold_,
         address dragonswapFactory_,
         address dragonswapRouter_
     ) external initializer {
@@ -119,17 +116,17 @@ contract Bonding is
         router = FRouter(router_);
         wsei = WSEI(wsei_);
 
-        _feeTo = feeTo_;
         assetLaunchFee = assetLaunchFee_;
         seiLaunchFee = seiLaunchFee_;
 
         initialSupply = initialSupply_;
-        assetRate = assetRate_;
         maxTx = maxTx_;
+
+        seiGradThreshold = seiGradThreshold_;
+        assetGradThreshold = assetGradThreshold_;
 
         dragonswapFactory = IDragonswapFactory(dragonswapFactory_);
         dragonswapRouter = IDragonswapRouter(dragonswapRouter_);
-        gradThreshold = gradThreshold_;
     }
 
     function _createUserProfile(address _user) internal returns (bool) {
@@ -162,28 +159,26 @@ contract Bonding is
         initialSupply = newSupply;
     }
 
-    function setGradThreshold(uint256 newThreshold) public onlyOwner {
-        gradThreshold = newThreshold;
+    function setSeiGradThreshold(uint256 newThreshold) public onlyOwner {
+        seiGradThreshold = newThreshold;
     }
 
-    function setAssetLaunchFee(uint256 newFee, address newFeeTo) public onlyOwner {
+    function setAssetGradThreshold(uint256 newThreshold) public onlyOwner {
+        assetGradThreshold = newThreshold;
+    }
+
+    // Defines the amount of assetToken required to launch a token
+    function setAssetLaunchFee(uint256 newFee) public onlyOwner {
         assetLaunchFee = newFee;
-        _feeTo = newFeeTo;
     }
 
-    function setSeiLaunchFee(uint256 newFee, address newFeeTo) public onlyOwner {
+    // Defines the amount of sei required to launch a token
+    function setSeiLaunchFee(uint256 newFee) public onlyOwner {
         seiLaunchFee = newFee;
-        _feeTo = newFeeTo;
     }
 
     function setMaxTx(uint256 maxTx_) public onlyOwner {
         maxTx = maxTx_;
-    }
-
-    function setAssetRate(uint256 newRate) public onlyOwner {
-        require(newRate > 0, "Rate err");
-
-        assetRate = newRate;
     }
 
     function setDeployParams(DeployParams memory params) public onlyOwner {
@@ -208,50 +203,53 @@ contract Bonding is
         address assetToken
     ) public nonReentrant returns (address, address, uint) {
         require(
-            purchaseAmount > assetLaunchFee,
-            "Purchase amount must be greater than fee"
+            purchaseAmount >= assetLaunchFee,
+            "Purchase amount must be greater than or equal to fee"
         );
         require(
             IERC20(assetToken).balanceOf(msg.sender) >= purchaseAmount,
             "Insufficient amount"
         );
         uint256 initialPurchase = (purchaseAmount - assetLaunchFee);
-        IERC20(assetToken).safeTransferFrom(msg.sender, _feeTo, assetLaunchFee);
         IERC20(assetToken).safeTransferFrom(
             msg.sender,
             address(this),
-            initialPurchase
+            purchaseAmount
         );
 
-        return _launch(_name, _ticker, assetToken, initialPurchase);       
+        return _launch(_name, _ticker, assetToken, initialPurchase, assetLaunchFee);       
     }
 
-    function _launch(string memory _name, string memory _ticker, address assetToken, uint256 initialPurchase) private returns (address, address, uint) {
+    function _launch(string memory _name, string memory _ticker, address assetToken, uint256 initialPurchase, uint256 initialLiquidity) private returns (address, address, uint) {
+        // Create the new token
         FERC20 token = new FERC20(_name, _ticker, initialSupply, maxTx);
         uint256 supply = token.totalSupply();
 
         address _pair = factory.createPair(address(token), assetToken);
 
+        // Ensure the router can spend all of it so it can deposit the tokens into the pool
         bool approved = _approval(address(router), address(token), supply);
         require(approved);
 
-        uint256 k = ((K * 10000) / assetRate);
-        uint256 liquidity = (((k * 10000 ether) / supply) * 1 ether) / 10000;
+        // Ensure the router can use all of the input assetToken as well
+        IERC20(assetToken).forceApprove(address(router), initialPurchase + initialLiquidity);
 
-        router.addInitialLiquidity(address(token), assetToken, supply, liquidity);
+        // Seed the pool with all the new token, and the initialLiquidity (fee)
+        router.addInitialLiquidity(address(token), assetToken, supply, initialLiquidity);
 
+        // Set up all the token data based on the initialLiquidity added
         Data memory _data = Data({
             token: address(token),
             name: string.concat("aiden ", _name),
             _name: _name,
             ticker: _ticker,
             supply: supply,
-            price: supply / liquidity,
-            marketCap: liquidity,
-            liquidity: liquidity * 2,
+            price: supply / initialLiquidity,
+            marketCap: initialLiquidity,
+            liquidity: initialLiquidity * 2,
             volume: 0,
             volume24H: 0,
-            prevPrice: supply / liquidity,
+            prevPrice: supply / initialLiquidity,
             lastUpdated: block.timestamp
         });
 
@@ -288,9 +286,9 @@ contract Bonding is
         emit Launched(address(token), _pair, n);
 
         // Make initial purchase
-        IERC20(assetToken).forceApprove(address(router), initialPurchase);
-        router.buy(initialPurchase, address(token), assetToken, address(this));
-        token.transfer(msg.sender, token.balanceOf(address(this)));
+        if (initialPurchase > 0) {
+            buy(initialPurchase, address(token), assetToken);
+        }
 
         return (address(token), _pair, n);
     }
@@ -443,7 +441,14 @@ contract Bonding is
             tokenInfo[tokenAddress].data.lastUpdated = block.timestamp;
         }
 
-        // If sufficient SEI has been deposited, graduate this token
+        // If sufficient tokens has been deposited, graduate this token
+        uint256 gradThreshold;
+        if (assetToken == address(wsei)) {
+            gradThreshold = seiGradThreshold;
+        } else {
+            gradThreshold = assetGradThreshold;
+        }
+
         if (pair.assetBalance() >= gradThreshold && tokenInfo[tokenAddress].trading) {
             console.log("Launching!");
             _graduateToken(tokenAddress, assetToken);
@@ -487,21 +492,17 @@ contract Bonding is
     /// @notice Launch a bonding token that uses SEI as it's asset pair
     function launchWithSEI(string memory _name, string memory _ticker) public payable returns (address, address, uint) {
         require(
-            msg.value > seiLaunchFee,
-            "Purchase amount must be greater than fee"
+            msg.value >= seiLaunchFee,
+            "Purchase amount must be greater than or equal to fee"
         );
         
         // Step 1: Wrap SEI into WSEI
         wsei.deposit{value: msg.value}();
 
-        // Step 2: Approve router to spend WSEI
-        wsei.approve(address(router), msg.value);
-
         uint256 initialPurchase = (msg.value - seiLaunchFee);
-        wsei.transfer(_feeTo, seiLaunchFee);
 
-        // Step 3: Execute existing ERC-20 launch logic
-        return _launch(_name, _ticker, address(wsei), initialPurchase);       
+        // Step 2: Execute existing ERC-20 launch logic
+        return _launch(_name, _ticker, address(wsei), initialPurchase, seiLaunchFee);       
     }
 
     function _graduateToken(address tokenAddress, address assetToken) private {
