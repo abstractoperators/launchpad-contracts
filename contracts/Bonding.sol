@@ -36,10 +36,9 @@ contract Bonding is
     uint256 public initialSupply;
     uint256 public assetLaunchFee;
     uint256 public seiLaunchFee;
-    uint256 public constant K = 3_000_000_000_000;
     uint256 public seiGradThreshold;
     uint256 public assetGradThreshold;
-    uint256 public maxTx;
+    uint256 public maxTx; // Max amount of token that can be bought at once, as a percentage.
 
     struct Profile {
         address user;
@@ -298,7 +297,7 @@ contract Bonding is
         address tokenAddress,
         address assetToken
     ) public returns (uint256 amountReceived) {
-        require(assetToken != address(wsei), "Call sellForSEI for dealing with wsei");
+        require(assetToken != address(wsei), "Call sellForSei for dealing with wsei");
         return sell(amountIn, tokenAddress, assetToken);
     }
 
@@ -450,7 +449,6 @@ contract Bonding is
         }
 
         if (pair.assetBalance() >= gradThreshold && tokenInfo[tokenAddress].trading) {
-            console.log("Launching!");
             _graduateToken(tokenAddress, assetToken);
         }
 
@@ -458,7 +456,7 @@ contract Bonding is
     }
 
     /// @notice Buy a bonding token using SEI
-    function buyWithSEI(address tokenAddress) public payable returns (bool) {
+    function buyWithSei(address tokenAddress) public payable returns (bool) {
         require(msg.value > 0, "Must send SEI");
 
         // Step 1: Wrap SEI into WSEI
@@ -472,7 +470,7 @@ contract Bonding is
     }
 
     /// @notice Sell a bonding token and receive SEI
-    function sellForSEI(uint256 amountIn, address tokenAddress) public nonReentrant returns (bool) {
+    function sellForSei(uint256 amountIn, address tokenAddress) public nonReentrant returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
         // Step 1: Approve router to spend user's bonding token
@@ -490,7 +488,7 @@ contract Bonding is
     }
 
     /// @notice Launch a bonding token that uses SEI as it's asset pair
-    function launchWithSEI(string memory _name, string memory _ticker) public payable returns (address, address, uint) {
+    function launchWithSei(string memory _name, string memory _ticker) public payable returns (address, address, uint) {
         require(
             msg.value >= seiLaunchFee,
             "Purchase amount must be greater than or equal to fee"
@@ -516,7 +514,7 @@ contract Bonding is
         // 1. Pull liquidity from bonding pool and deposit into DragonSwap
 
         // Transfer assets from old pool to this contract
-        (uint256 tokenAmount, uint256 assetAmount) = router.emptyPool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
+        (uint256 tokenAmount, uint256 assetAmount) = router.graduatePool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
 
         console.log("In here");
         // Approve router
@@ -548,5 +546,74 @@ contract Bonding is
         address dragonswapPair = dragonswapFactory.getPair(tokenAddress, dragonswapAsset);
         _token.pair = dragonswapPair;
         emit Graduated(tokenAddress, dragonswapPair);
+    }
+
+/// HELPER QUERY FUNCTIONS ///
+
+    // Calculate the maximum that can be sent at launch, based on the initalSupply, tax and fees.
+    function getMaxLaunchInputAsset() public view returns (uint256 maxInput) {
+        return getMaxLaunchInput(assetLaunchFee);
+    }
+
+    // Calculate the maximum that can be sent at launch, based on the initalSupply, tax and fees.
+    function getMaxLaunchInputSei() public view returns (uint256 maxInput) {
+        return getMaxLaunchInput(seiLaunchFee);
+    }
+
+    function getMaxLaunchInput(uint256 launchFee) private view returns (uint256 maxInput) {
+        uint targetSale = factory.sellTarget();
+        uint256 syntheticAssets = (10000/targetSale) * launchFee;
+        uint256 maxBuy = maxBuyInput(initialSupply, maxTx, initialSupply, syntheticAssets);
+
+        // Add flat fee back
+        maxInput = maxBuy + launchFee; 
+    }
+
+    // Gets the maximum input to a buy using SEI at this point given the tokens max tx, supply and balances.
+    function getMaxBuyInputSei(address token) public view returns (uint256 maxInput) {
+        return getMaxBuyInputAsset(token, address(wsei));
+    }
+
+    // Gets the maximum input to a buy at this point given the tokens max tx, supply and balances.
+    function getMaxBuyInputAsset(address token, address assetToken) public view returns (uint256 maxInput) {
+        address pairAddr = factory.getPair(token, assetToken);
+        IFPair pair = IFPair(pairAddr);
+        FERC20 tokenContract = FERC20(token);
+        uint256 totalSupply = tokenContract.totalSupply();
+        uint256 tokenMaxTx = tokenContract.maxTx();
+        uint256 tokenBalance = pair.balance();
+        uint256 assetBalance = pair.syntheticAssetBalance();
+
+        return maxBuyInput(totalSupply, tokenMaxTx, tokenBalance, assetBalance);
+    }
+
+    function maxBuyInput(
+        uint256 totalSupply,
+        uint256 tokenMaxTx,
+        uint256 tokenBalance,
+        uint256 assetBalance
+    ) private view returns (uint256 maxBuy) {
+        // Max amount of tokens a user can buy (based on maxTx)
+        uint256 maxTokenBuy = (totalSupply * tokenMaxTx) / 100;
+
+        // Based on bonding curve formula:
+        // amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
+        // maxTokenBuy = (buyAmount * initialSupply) / (launchFee + buyAmount)
+        // To solve for buyAmount:
+        // maxTokenBuy(launchFee + buyAmount) = buyAmount * initialSupply
+        // maxTokenBuy(launchFee) = buyAmount(initialSupply) - maxTokenBuy(buyAmount) = buyAmount(initialSupply - maxTokenBuy)
+        // buyAmount = maxTokenBuy(launchFee)/(initialSupply - maxTokenBuy)
+        uint256 buyAmount;
+        if (tokenBalance <= maxTokenBuy) {
+            buyAmount = tokenBalance;
+        } else {
+            buyAmount = (maxTokenBuy * assetBalance) / (tokenBalance - maxTokenBuy);
+        }
+
+        // Account for the tax from the router
+        uint256 buyTax = factory.buyTax();
+        uint256 buyAmountWithTax = buyAmount * 100 / (100 - buyTax);
+
+        return buyAmountWithTax;
     }
 }

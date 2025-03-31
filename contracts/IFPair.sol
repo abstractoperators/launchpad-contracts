@@ -6,9 +6,13 @@ interface IFPair {
 
     function assetBalance() external view returns (uint256);
 
+    function syntheticAssetBalance() external view returns (uint256);
+
     function balance() external view returns (uint256);
 
     function mint() external returns (bool);
+
+    function burnToken(uint256 amount) external returns (bool);
 
     function transferAsset(address recipient, uint256 amount) external;
 

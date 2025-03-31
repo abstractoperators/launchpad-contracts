@@ -35,7 +35,7 @@ describe("Bonding Contract", function () {
 
         await network.provider.send("hardhat_setBalance", [
             await user.getAddress(),
-            "0xA968163F0A57B4000000", // 500,000 SEI in hex
+            "0xA968163F0A57B400000000", // 500,000,000 SEI in hex
         ]);
         
         // Deploy a mock ERC20 token to act as the assetToken
@@ -50,7 +50,7 @@ describe("Bonding Contract", function () {
 
         // Deploy Factory contract
         const FFactory = await ethers.getContractFactory("FFactory");
-        Factory = await upgrades.deployProxy(FFactory, [await feeRecipient.getAddress(), 5, 5], { initializer: "initialize" });
+        Factory = await upgrades.deployProxy(FFactory, [await feeRecipient.getAddress(), 5, 5, 20], { initializer: "initialize" });
         await Factory.waitForDeployment();
 
         // Deploy Router contract
@@ -58,8 +58,8 @@ describe("Bonding Contract", function () {
         Router = await upgrades.deployProxy(FRouter, [Factory.target], { initializer: "initialize" });
         await Router.waitForDeployment();
 
-        const FPair = await ethers.getContractFactory("FPair");
-        PairAbi = FPair.interface
+        const SyntheticPair = await ethers.getContractFactory("SyntheticPair");
+        PairAbi = SyntheticPair.interface
 
         DragonswapRouter = await ethers.getContractAt("IDragonswapRouter", dragonswapRouter);
         DragonswapFactory = await ethers.getContractAt("IDragonswapFactory", dragonswapFactory);
@@ -146,13 +146,14 @@ describe("Bonding Contract", function () {
 
     it("should allow user to launch a token", async function () {
         // Send some token from owner to user
-        const transferResult = await AssetToken.connect(owner).transfer(await user.getAddress(), ethers.parseEther("200"))
+        const launchFee = await Bonding.assetLaunchFee()
+
+        const transferResult = await AssetToken.connect(owner).transfer(await user.getAddress(), launchFee)
         await transferResult.wait()
 
         // User approves Bonding contract to spend AssetToken so it can seed the liquidity pool with the initial purchase.
-        const launchFee = await Bonding.assetLaunchFee()
-        await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("200"));
-
+        await AssetToken.connect(user).approve(Bonding.target, launchFee);
+        
         // Launch a token
         const tx = await Bonding.connect(user).launchWithAsset(
             "Test Token",
@@ -215,12 +216,13 @@ describe("Bonding Contract", function () {
     it("should dispense less tokens as more buys are performed", async function () {
         // Launch another token
         // Approves Bonding contract to spend AssetToken so it can seed the liquidity pool with the initial purchase.
-        await AssetToken.connect(owner).approve(Bonding.target, ethers.parseEther("200"));
+        const launchFee = await Bonding.assetLaunchFee();
+        await AssetToken.connect(owner).approve(Bonding.target, launchFee);
 
         const tx = await Bonding.connect(owner).launchWithAsset(
             "Another Token",
             "ATT",
-            ethers.parseEther("200"), // Purchase amount
+            launchFee, // Purchase amount
             AssetToken.target
         );
 
@@ -256,11 +258,12 @@ describe("Bonding Contract", function () {
 
     it("should allow a user to buy and sell tokens using SEI", async function () {
         // First launch a token that has SEI as it's asset token:
-        const tx = await Bonding.connect(user).launchWithSEI(
+        const launchFee = await Bonding.seiLaunchFee();
+        const tx = await Bonding.connect(user).launchWithSei(
             "Test Sei Token",
             "TSTS",
             {
-                value: ethers.parseEther("200"),
+                value: launchFee,
             }
         );
 
@@ -278,8 +281,7 @@ describe("Bonding Contract", function () {
         const startSEIBalance = await ethers.provider.getBalance(userAddress);
 
         // Buy with SEI
-        console.log("Start")
-        const buyTx = await Bonding.connect(user).buyWithSEI(tokenAddress, {
+        const buyTx = await Bonding.connect(user).buyWithSei(tokenAddress, {
             value: ethers.parseEther("10"),
         });
         const buyReceipt = await buyTx.wait();
@@ -295,7 +297,7 @@ describe("Bonding Contract", function () {
         await tokenContract.connect(user).approve(Bonding.target, newTokenBal / BigInt(2));
 
         // Sell tokens for SEI
-        const sellTx = await Bonding.connect(user).sellForSEI(newTokenBal / BigInt(2), tokenAddress);
+        const sellTx = await Bonding.connect(user).sellForSei(newTokenBal / BigInt(2), tokenAddress);
         const sellReceipt = await sellTx.wait();
 
         const finalTokenBal = await tokenContract.balanceOf(userAddress);
@@ -309,9 +311,13 @@ describe("Bonding Contract", function () {
     it("should deduct fees on launch and tax on buys and sells", async function () {
         const buyTax = await Factory.buyTax();
         const taxVault = await Factory.taxVault();
+        const launchFee = await Bonding.seiLaunchFee();
+
+        const transferResult = await AssetToken.connect(owner).transfer(await user.getAddress(), launchFee)
+        transferResult.wait();
         await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("100"));
 
-        const pair = await ethers.getContractAt("FPair", AssetTradedPair, user)
+        const pair = await ethers.getContractAt("SyntheticPair", AssetTradedPair, user)
         const before = await pair.assetBalance()
         const buyAmount = ethers.parseEther("100")
         const tx = await Bonding.connect(user).buyWithAsset(buyAmount, AssetTradedToken, AssetToken.target);
@@ -319,9 +325,6 @@ describe("Bonding Contract", function () {
 
         const after = await pair.assetBalance()
 
-        console.log("BTax", buyTax)
-        console.log("BuyAmt", buyAmount)
-        console.log("BTBI", buyTax/BigInt(100))
         // Expect that the amount of tokens deposited into the pool is equal to buyAmount reduced by buyTax percent
         expect(after - before).to.be.equals(buyAmount * (100n - buyTax) / 100n)
     })
@@ -333,7 +336,7 @@ describe("Bonding Contract", function () {
 
         // Launch and buy an amount so that the asset supply is just under the graduation threshold (reduced by fees)
         const buyAmount = gradThreshold
-        const tx = await Bonding.connect(user).launchWithSEI(
+        const tx = await Bonding.connect(user).launchWithSei(
             "GraduateToken",
             "GTK",
             {
@@ -350,10 +353,9 @@ describe("Bonding Contract", function () {
         let assetReserve = await pair.assetBalance();
 
         const oldPrice = await Router.getAmountOut(await WSEI.getAddress(), GraduatedToken, ethers.parseEther("1"))
-        console.log("REST", oldPrice)
 
         // This buy should cross the threshold and trigger the graduation process
-        const buyTx = await Bonding.connect(user).buyWithSEI(GraduatedToken, {
+        const buyTx = await Bonding.connect(user).buyWithSei(GraduatedToken, {
             value: (gradThreshold - assetReserve) * BigInt(2),
         });
         const buyReceipt = await buyTx.wait();
@@ -384,7 +386,6 @@ describe("Bonding Contract", function () {
         const path = [await DragonswapRouter.WSEI(), GraduatedToken];
         const amounts = await DragonswapRouter.getAmountsOut(ethers.parseEther("1"), path);
         const newPrice = amounts[1]; // The result after the swap
-        console.log("RESS", newPrice)
         expect(oldPrice-newPrice).to.be.lessThan(ethers.parseEther('10'))
     })
 
@@ -393,7 +394,7 @@ describe("Bonding Contract", function () {
         let buySucceeded = false
         try {
             // This buy should fail since the token is no longer trading
-            const buyTx = await Bonding.connect(user).buyWithSEI(GraduatedToken, {
+            const buyTx = await Bonding.connect(user).buyWithSei(GraduatedToken, {
                 value: ethers.parseEther("20000"),
             });
             const buyReceipt = await buyTx.wait();
@@ -404,11 +405,114 @@ describe("Bonding Contract", function () {
         expect(buySucceeded).to.be.equal(false);
     })
 
-    // Test deployment fees
-
-
     // Test taxes on deployed pools?
 
     // Test max tx (max percentage of token that can be bought at once)
+    it("Should limit the amount of token that can be traded based on maxTx", async function () {
+        const maxPercentage = 20
+        await Bonding.setMaxTx(maxPercentage);
+        expect(await Bonding.maxTx()).to.equal(maxPercentage);
+        
+        const maxLaunchInput = await Bonding.getMaxLaunchInputSei();
+        console.log("maximum", ethers.formatEther(maxLaunchInput));
 
+        // Launch token with a large initial purchase - this should fail
+        try {
+            const tx = await Bonding.connect(user).launchWithSei(
+                "LimitedToken",
+                "LMT",
+                {
+                    value: maxLaunchInput + ethers.parseEther("1")
+                }
+            );
+    
+            await tx.wait();
+            expect.fail("Expected transaction to revert with 'Exceeds MaxTx', but it succeeded");
+        } catch (error: any) {
+            // Expect that the revert reason should have the error message "Exceeds MaxTx"
+            const revertReason = error?.error?.message || error?.reason || error?.message;
+          
+            expect(revertReason).to.contain("Exceeds MaxTx")
+        }
+
+        // Now launch the token normally
+        const tx = await Bonding.connect(user).launchWithSei(
+            "LimitedToken",
+            "LMT",
+            {
+                value: maxLaunchInput
+            }
+        );
+
+        const receipt = await tx.wait();
+
+        const launchEvent = getLaunchedEvent(receipt)
+        const tokenAddress = launchEvent.args.token;
+        expect(tokenAddress).to.be.properAddress;
+
+        // Test that there is a maximum limit to the buy amount
+        const maxBuy = await Bonding.getMaxBuyInputSei(tokenAddress)
+        try {
+            const buyTx = await Bonding.connect(user).buyWithSei(tokenAddress, {
+                value: maxBuy + ethers.parseEther("1"),
+            });
+
+            await buyTx.wait();
+            expect.fail("Expected transaction to revert with 'Exceeds MaxTx', but it succeeded");
+        } catch (error: any) {
+            // Expect that the revert reason should have the error message "Exceeds MaxTx"
+            const revertReason = error?.error?.message || error?.reason || error?.message;
+          
+            expect(revertReason).to.contain("Exceeds MaxTx")
+        }
+
+        // Test that we are good if we buy the exact limit
+        const buyTx = await Bonding.connect(user).buyWithSei(tokenAddress, {
+            value: maxBuy,
+        });
+
+        buyTx.wait();
+    })
+
+    // Test how much token 100000 SEI buys, as a proportion of total supply
+    it("Should sell a reasonable percentage of token for 100000 SEI", async function () {
+        const maxPercentage = 100
+        await Bonding.setMaxTx(maxPercentage);
+        expect(await Bonding.maxTx()).to.equal(maxPercentage);
+        const launchFee = await Bonding.seiLaunchFee();
+        
+        // Launch token
+        const tx = await Bonding.connect(user).launchWithSei(
+            "SomeToken",
+            "SMT",
+            {
+                value: launchFee
+            }
+        );
+
+        const receipt = await tx.wait();
+
+        const launchEvent = getLaunchedEvent(receipt)
+        const tokenAddress = launchEvent.args.token;
+        expect(tokenAddress).to.be.properAddress;
+
+        // See how much token we own after buying 100000 SEI worth
+        const buyTax = await Factory.buyTax();
+
+        const amountToBuy = 100000n * (100n / (100n - buyTax))
+        const buyTx = await Bonding.connect(user).buyWithSei(tokenAddress, {
+            value: ethers.parseEther(amountToBuy.toString()),
+        });
+
+        buyTx.wait();
+
+        const tokenContract = await ethers.getContractAt("FERC20", tokenAddress);
+        const tokenBalance = await tokenContract.balanceOf(await user.getAddress());
+        console.log("tokenBalance", tokenBalance)
+
+        const totalSupply = await tokenContract.totalSupply();
+        console.log("totalSupply", totalSupply);
+        console.log("percentage", (tokenBalance*100n)/totalSupply)
+        
+    })
 });

@@ -8,23 +8,28 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./IFPair.sol";
 import "./FERC20.sol";
 
-contract FPair is IFPair, ReentrancyGuard {
+contract SyntheticPair is IFPair, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public router;
     address public tokenA;
     address public tokenB;
+    uint targetSoldPercentage; // This is the percentage of token we expect to have sold once we hit bonding.
 
     uint256 private lastUpdated;
 
-    constructor(address router_, address token0, address token1) {
+    constructor(address router_, address token0, address token1, uint targetSoldPercentage_) {
         require(router_ != address(0), "Zero addresses are not allowed.");
         require(token0 != address(0), "Zero addresses are not allowed.");
         require(token1 != address(0), "Zero addresses are not allowed.");
+        require(targetSoldPercentage_ <= 100, "TargetSoldPercentage must be between 1 to 100.");
+        require(targetSoldPercentage_ > 0, "TargetSoldPercentage must be between 1 to 100.");
+
 
         router = router_;
         tokenA = token0;
         tokenB = token1;
+        targetSoldPercentage = targetSoldPercentage_;
     }
 
     modifier onlyRouter() {
@@ -96,6 +101,7 @@ contract FPair is IFPair, ReentrancyGuard {
 
     function transferTo(address recipient, uint256 amount) public onlyRouter {
         require(recipient != address(0), "Zero addresses are not allowed.");
+
         IERC20(tokenA).safeTransfer(recipient, amount);
     }
 
@@ -113,9 +119,9 @@ contract FPair is IFPair, ReentrancyGuard {
         return IERC20(tokenB).balanceOf(address(this));
     }
 
-    // No diff for this basic pool.
+    // This returns the synthetic asset balance in the pool.
     function syntheticAssetBalance() public view returns (uint256) {
-        return assetBalance();
+        return (100000/targetSoldPercentage) * assetBalance();
     }
 
     function burnToken(uint256 amount) public onlyRouter returns (bool) {
@@ -126,8 +132,8 @@ contract FPair is IFPair, ReentrancyGuard {
     function getAmountOut(address inputToken, uint256 amountIn) external view returns (uint256 amountOut) {
         require(amountIn > 0, "Amount in must be greater than zero");
 
-        uint256 balance0 = IERC20(tokenA).balanceOf(address(this));
-        uint256 balance1 = IERC20(tokenB).balanceOf(address(this));
+        uint256 balance0 = balance();
+        uint256 balance1 = syntheticAssetBalance();
 
         uint256 reserveIn;
         uint256 reserveOut;

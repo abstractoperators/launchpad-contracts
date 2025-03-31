@@ -152,8 +152,10 @@ contract FRouter is
         return (amount, amountOut);
     }
 
-    // Empties out the pool by transferring all balances to the sender.
-    function emptyPool(
+    // Graduates the pool by transferring balances to the sender so that they can be deposited into a Dragonswap pool.
+    // It transfers all the SEI but only enough token so that the price in the Dragonswap pool will continue to be the same.
+    // All remaining tokens are burned.
+    function graduatePool(
         address tokenAddress,
         address assetToken
     ) public onlyRole(EXECUTOR_ROLE) nonReentrant returns (uint256, uint256) {
@@ -161,11 +163,20 @@ contract FRouter is
         address pair = factory.getPair(tokenAddress, assetToken);
         uint256 assetBalance = IFPair(pair).assetBalance();
         uint256 tokenBalance = IFPair(pair).balance();
+        uint256 syntheticReserve = IFPair(pair).syntheticAssetBalance(); // R_s
+
+        require(syntheticReserve > 0, "Reserve should be greater than 0");
+
+        uint256 targetTokenBalance = (tokenBalance * assetBalance) / syntheticReserve;
+        require(tokenBalance >= targetTokenBalance, "Not enough balance to support target withdrawal");
+
+        uint256 tokensToBurn = tokenBalance - targetTokenBalance;
 
         IFPair(pair).transferAsset(msg.sender, assetBalance);
-        IFPair(pair).transferTo(msg.sender, tokenBalance);
+        IFPair(pair).transferTo(msg.sender, targetTokenBalance);
+        IFPair(pair).burnToken(tokensToBurn);
 
-        return (tokenBalance, assetBalance);
+        return (targetTokenBalance, assetBalance);
     }
 
     function approval(

@@ -13,6 +13,7 @@ export const getLaunchedEvent = (receipt: any): any => {
     if (!eventFound) {
         return
     }
+    
     // Search for the matching log
     const launchedLog = receipt.logs.find(
         (log: Log) => log.topics[0] === eventFound.topicHash

@@ -6,6 +6,8 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
 import "./FPair.sol";
+import "./SyntheticPair.sol";
+
 
 contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -20,6 +22,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
     address public taxVault;
     uint256 public buyTax;
     uint256 public sellTax;
+    uint public sellTarget; // This is the percentage of token we expect to have sold once we hit bonding.
 
     event PairCreated(
         address indexed tokenA,
@@ -36,15 +39,20 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
     function initialize(
         address taxVault_,
         uint256 buyTax_,
-        uint256 sellTax_
+        uint256 sellTax_,
+        uint sellTarget_
     ) external initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
 
+        require(buyTax <= 100, "Buy Tax must be a percentage between 0 to 100");
+        require(sellTax <= 100, "Sell Tax must be a percentage between 0 to 100");
+
         taxVault = taxVault_;
         buyTax = buyTax_;
         sellTax = sellTax_;
+        sellTarget = sellTarget_;
     }
 
     function _createPair(
@@ -55,7 +63,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         require(tokenB != address(0), "Zero addresses are not allowed.");
         require(router != address(0), "No router");
 
-        FPair pair_ = new FPair(router, tokenA, tokenB);
+        SyntheticPair pair_ = new SyntheticPair(router, tokenA, tokenB, sellTarget);
 
         _pair[tokenA][tokenB] = address(pair_);
         _pair[tokenB][tokenA] = address(pair_);
@@ -96,6 +104,8 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         uint256 sellTax_
     ) public onlyRole(ADMIN_ROLE) {
         require(newVault_ != address(0), "Zero addresses are not allowed.");
+        require(buyTax <= 100, "Buy Tax must be a percentage between 0 to 100");
+        require(sellTax <= 100, "Sell Tax must be a percentage between 0 to 100");
 
         taxVault = newVault_;
         buyTax = buyTax_;
