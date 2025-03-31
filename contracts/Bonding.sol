@@ -561,8 +561,8 @@ contract Bonding is
     }
 
     function getMaxLaunchInput(uint256 launchFee) private view returns (uint256 maxInput) {
-        uint targetSale = factory.sellTarget();
-        uint256 syntheticAssets = (10000/targetSale) * launchFee;
+        uint multiplier = factory.multiplier();
+        uint256 syntheticAssets = multiplier * launchFee;
         uint256 maxBuy = maxBuyInput(initialSupply, maxTx, initialSupply, syntheticAssets);
 
         // Add flat fee back

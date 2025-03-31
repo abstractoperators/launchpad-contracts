@@ -14,22 +14,21 @@ contract SyntheticPair is IFPair, ReentrancyGuard {
     address public router;
     address public tokenA;
     address public tokenB;
-    uint targetSoldPercentage; // This is the percentage of token we expect to have sold once we hit bonding.
+    
+    // This is the multiplier on the assetToken - it is an arbitrary constant that's used to influence the total percentage of token x assetToken can buy.
+    uint multiplier; 
 
     uint256 private lastUpdated;
 
-    constructor(address router_, address token0, address token1, uint targetSoldPercentage_) {
+    constructor(address router_, address token0, address token1, uint multiplier_) {
         require(router_ != address(0), "Zero addresses are not allowed.");
         require(token0 != address(0), "Zero addresses are not allowed.");
         require(token1 != address(0), "Zero addresses are not allowed.");
-        require(targetSoldPercentage_ <= 100, "TargetSoldPercentage must be between 1 to 100.");
-        require(targetSoldPercentage_ > 0, "TargetSoldPercentage must be between 1 to 100.");
-
 
         router = router_;
         tokenA = token0;
         tokenB = token1;
-        targetSoldPercentage = targetSoldPercentage_;
+        multiplier = multiplier_;
     }
 
     modifier onlyRouter() {
@@ -121,7 +120,7 @@ contract SyntheticPair is IFPair, ReentrancyGuard {
 
     // This returns the synthetic asset balance in the pool.
     function syntheticAssetBalance() public view returns (uint256) {
-        return (100000/targetSoldPercentage) * assetBalance();
+        return multiplier * assetBalance();
     }
 
     function burnToken(uint256 amount) public onlyRouter returns (bool) {

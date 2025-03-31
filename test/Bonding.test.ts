@@ -50,7 +50,8 @@ describe("Bonding Contract", function () {
 
         // Deploy Factory contract
         const FFactory = await ethers.getContractFactory("FFactory");
-        Factory = await upgrades.deployProxy(FFactory, [await feeRecipient.getAddress(), 5, 5, 20], { initializer: "initialize" });
+        const multiplier = 5000
+        Factory = await upgrades.deployProxy(FFactory, [await feeRecipient.getAddress(), 5, 5, multiplier], { initializer: "initialize" });
         await Factory.waitForDeployment();
 
         // Deploy Router contract

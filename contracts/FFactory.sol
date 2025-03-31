@@ -22,7 +22,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
     address public taxVault;
     uint256 public buyTax;
     uint256 public sellTax;
-    uint public sellTarget; // This is the percentage of token we expect to have sold once we hit bonding.
+    uint public multiplier;
 
     event PairCreated(
         address indexed tokenA,
@@ -40,7 +40,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         address taxVault_,
         uint256 buyTax_,
         uint256 sellTax_,
-        uint sellTarget_
+        uint multiplier_
     ) external initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -52,7 +52,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         taxVault = taxVault_;
         buyTax = buyTax_;
         sellTax = sellTax_;
-        sellTarget = sellTarget_;
+        multiplier = multiplier_;
     }
 
     function _createPair(
@@ -63,7 +63,7 @@ contract FFactory is Initializable, AccessControlUpgradeable, ReentrancyGuardUpg
         require(tokenB != address(0), "Zero addresses are not allowed.");
         require(router != address(0), "No router");
 
-        SyntheticPair pair_ = new SyntheticPair(router, tokenA, tokenB, sellTarget);
+        SyntheticPair pair_ = new SyntheticPair(router, tokenA, tokenB, multiplier);
 
         _pair[tokenA][tokenB] = address(pair_);
         _pair[tokenB][tokenA] = address(pair_);
