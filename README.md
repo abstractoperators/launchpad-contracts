@@ -9,6 +9,7 @@ This repo contains contracts used for a fair token launch mechanism
 2. In order to compile the contracts, run `npx hardhat compile`. This outputs contracts in the artifacts directory
 
 ## Testing
+
 1. To add tests, you can add tests to `./test`. Refer to `Bonding.test.ts` as an example.
 
 2. This framework relies on access to dragonswap contracts on testnet. Spin up a local fork of testnet by running `npx hardhat node --fork https://evm-rpc-testnet.sei-apis.com`
@@ -18,6 +19,7 @@ This repo contains contracts used for a fair token launch mechanism
 ## Contracts and Architecture
 
 To deploy these contracts, you would need to deploy, in order,
+
 1. WSEI Contract
 2. AssetToken (If using an underlying token other than SEI)
 3. FFactory Contract
@@ -25,3 +27,9 @@ To deploy these contracts, you would need to deploy, in order,
 5. Bonding Contract.
 
 TODO: Should probably provide a script here to deploy these sequentially on a chosen network and return the addresses.
+
+## Deployment Script
+
+```bash
+npx hardhat ignition deploy ignition/modules/AIDEN.ts --network testnet
+```
