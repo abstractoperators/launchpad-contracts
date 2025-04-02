@@ -68,7 +68,8 @@ async function main() {
 
     const initialSupply = ethers.parseEther("100000"); 
     const gradTheshold = ethers.parseEther("25000");
-    const launchFee = ethers.parseEther("100"); // 100 AIDEN asset
+    // const launchFee = ethers.parseEther("100"); // 100 AIDEN asset
+    const launchFee = ethers.parseEther("0.1");
     const maxTx = 20;
 
     await Bonding.initialize(
