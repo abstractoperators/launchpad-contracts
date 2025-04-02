@@ -98,6 +98,7 @@ describe("Bonding Contract", function () {
             maxTx, // maximum percentage of each token that can be bought in one tx.
             gradThreshold, // sei grad threshold
             gradThreshold, // asset grad threshold
+            100, // Sets the dragonswap tax bps (100 is 1%)
             dragonswapFactory,
             dragonswapRouter
         );
@@ -410,7 +411,7 @@ describe("Bonding Contract", function () {
 
     // Test max tx (max percentage of token that can be bought at once)
     it("Should limit the amount of token that can be traded based on maxTx", async function () {
-        const maxPercentage = 20
+        const maxPercentage = 10
         await Bonding.setMaxTx(maxPercentage);
         expect(await Bonding.maxTx()).to.equal(maxPercentage);
         
@@ -432,7 +433,7 @@ describe("Bonding Contract", function () {
         } catch (error: any) {
             // Expect that the revert reason should have the error message "Exceeds MaxTx"
             const revertReason = error?.error?.message || error?.reason || error?.message;
-          
+            console.log("Full reason", revertReason)
             expect(revertReason).to.contain("Exceeds MaxTx")
         }
 
@@ -463,7 +464,7 @@ describe("Bonding Contract", function () {
         } catch (error: any) {
             // Expect that the revert reason should have the error message "Exceeds MaxTx"
             const revertReason = error?.error?.message || error?.reason || error?.message;
-          
+            console.log("Full reason", revertReason)
             expect(revertReason).to.contain("Exceeds MaxTx")
         }
 
