@@ -10,7 +10,11 @@ type DragonSwapAddresses = {
 };
 
 const dragonSwapContracts: Record<string, DragonSwapAddresses> = {
-    "testnet": {
+    "local_testnet": {
+        factory: "0xeE6Ad607238f8d2C63767245d78520F06c303D31",
+        router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
+    },
+    "real_testnet": {
         factory: "0xeE6Ad607238f8d2C63767245d78520F06c303D31",
         router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
     },
