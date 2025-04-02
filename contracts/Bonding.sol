@@ -39,6 +39,8 @@ contract Bonding is
     uint256 public seiGradThreshold;
     uint256 public assetGradThreshold;
     uint256 public maxTx; // Max amount of token that can be bought at once, as a percentage.
+    uint256 dragonswapTaxBps; // Tax rate on dragonswap swaps (post graduation), in BPS (100 = 1%)
+
 
     struct Profile {
         address user;
@@ -105,6 +107,7 @@ contract Bonding is
         uint256 maxTx_,
         uint256 seiGradThreshold_,
         uint256 assetGradThreshold_,
+        uint256 dragonswapTaxBps_,
         address dragonswapFactory_,
         address dragonswapRouter_
     ) external initializer {
@@ -123,6 +126,7 @@ contract Bonding is
 
         seiGradThreshold = seiGradThreshold_;
         assetGradThreshold = assetGradThreshold_;
+        dragonswapTaxBps = dragonswapTaxBps_;
 
         dragonswapFactory = IDragonswapFactory(dragonswapFactory_);
         dragonswapRouter = IDragonswapRouter(dragonswapRouter_);
@@ -516,7 +520,6 @@ contract Bonding is
         // Transfer assets from old pool to this contract
         (uint256 tokenAmount, uint256 assetAmount) = router.graduatePool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
 
-        console.log("In here");
         // Approve router
         IERC20(tokenAddress).approve(address(dragonswapRouter), tokenAmount);
         IERC20(assetToken).approve(address(dragonswapRouter), assetAmount);
@@ -545,6 +548,10 @@ contract Bonding is
 
         address dragonswapPair = dragonswapFactory.getPair(tokenAddress, dragonswapAsset);
         _token.pair = dragonswapPair;
+
+        address taxVault = factory.taxVault();
+        FERC20(tokenAddress).updateTaxSettings(dragonswapPair, taxVault, dragonswapTaxBps);
+
         emit Graduated(tokenAddress, dragonswapPair);
     }
 

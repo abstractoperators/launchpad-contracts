@@ -10,8 +10,13 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
     uint256 private _maxTxAmount; // The maximum amount of token that can be bought at once, derived from maxTx
     mapping(address => bool) private isExcludedFromMaxTx;
 
-    event MaxTxUpdated(uint256 _maxTx);
+    address public dragonSwapPool;
+    address public taxReceiver;
+    uint256 public taxBasisPoints; // 100 = 1%, 1000 = 10%, etc.
 
+    event MaxTxUpdated(uint256 _maxTx);
+    event TaxSettingsUpdated(address pool, address receiver, uint256 bps);
+    
     constructor(
         string memory name_,
         string memory symbol_,
@@ -39,14 +44,31 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
         isExcludedFromMaxTx[user] = true;
     }
 
+    function updateTaxSettings(
+        address _pool,
+        address _receiver,
+        uint256 _taxBps
+    ) external onlyOwner {
+        require(_receiver != address(0), "ERC20: zero tax address");
+        require(_taxBps <= 1000, "ERC20: tax too high"); // max 10%
+        dragonSwapPool = _pool;
+        taxReceiver = _receiver;
+        taxBasisPoints = _taxBps;
+        emit TaxSettingsUpdated(_pool, _receiver, _taxBps);
+    }
+
     function transfer(address recipient, uint256 amount) public override returns (bool) {
         _checkMaxTx(_msgSender(), amount);
-        return super.transfer(recipient, amount);
+        _transferWithTax(_msgSender(), recipient, amount);
+        return true;
     }
 
     function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
         _checkMaxTx(sender, amount);
-        return super.transferFrom(sender, recipient, amount);
+        address spender = _msgSender();
+        _spendAllowance(sender, spender, amount);
+        _transferWithTax(sender, recipient, amount);
+        return true;
     }
 
     function forceApprove(address spender, uint256 amount) public returns (bool) {
@@ -58,6 +80,22 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
     function _checkMaxTx(address sender, uint256 amount) internal view {
         if (!isExcludedFromMaxTx[sender]) {
             require(amount <= _maxTxAmount, "Exceeds MaxTx");
+        }
+    }
+
+    function _transferWithTax(address from, address to, uint256 amount) internal {
+        if (
+            taxBasisPoints > 0 &&
+            (from == dragonSwapPool || to == dragonSwapPool) &&
+            from != taxReceiver &&
+            to != taxReceiver
+        ) {
+            uint256 tax = (amount * taxBasisPoints) / 10_000;
+            uint256 remaining = amount - tax;
+            super._transfer(from, taxReceiver, tax);
+            super._transfer(from, to, remaining);
+        } else {
+            super._transfer(from, to, amount);
         }
     }
 }
