@@ -88,8 +88,8 @@ async function main() {
     );
     console.log("Bonding initialized");
 
-    await Factory.connect(owner).grantRole(ADMIN_ROLE, await Bonding.target);
-    await Router.connect(owner).grantRole(ADMIN_ROLE, await Bonding.target);
+    await Factory.connect(owner).grantRole(CREATOR_ROLE, await Bonding.target);
+    await Router.connect(owner).grantRole(EXECUTOR_ROLE, await Bonding.target);
 }
 
 main()
