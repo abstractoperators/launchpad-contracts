@@ -398,7 +398,7 @@ describe("Bonding Contract", function () {
         );
 
         const {launchedTokenContract, syntheticPairContract} = await getLaunchedTokenAndPairContracts(Bonding);
-        await Bonding.setAssetGradThreshold(ethers.parseEther('500'));
+        await Bonding.setAssetGradThreshold(ethers.parseEther('300'));
         let tokenInfo = await Bonding.tokenInfo(launchedTokenContract);
         expect(tokenInfo.trading).to.be.true;
 
@@ -411,6 +411,8 @@ describe("Bonding Contract", function () {
         const [tokenBalance, assetBalance ] = await syntheticPairContract.getReserves();
         expect(tokenBalance).to.be.eq(0);
         expect(assetBalance).to.be.eq(0);
+
+        await Bonding.setAssetGradThreshold(ethers.parseEther('25000'));
     });
 
     it("should allow a user to buy and sell tokens", async function () {
