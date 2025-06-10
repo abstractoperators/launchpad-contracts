@@ -285,7 +285,7 @@ contract Bonding is
 
         // Make initial purchase
         if (initialPurchase > 0) {
-            buy(initialPurchase, address(token), assetToken);
+            buy(initialPurchase, address(token), assetToken, 0);
         }
 
         return (address(token), _pair, n);
@@ -296,16 +296,18 @@ contract Bonding is
     function sellForAsset(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) public returns (uint256 amountReceived) {
         require(assetToken != address(wsei), "Call sellForSei for dealing with wsei");
-        return sell(amountIn, tokenAddress, assetToken);
+        return sell(amountIn, tokenAddress, assetToken, amountOutMin);
     }
 
     function sell(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) private returns (uint256 amountReceived) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
@@ -336,6 +338,8 @@ contract Bonding is
             assetToken,
             recipient
         );
+
+        require(_amountReceived >= amountOutMin, "Insufficient output amount");
 
         uint256 newReserveA = reserveA + amount0In;
         uint256 newReserveB = reserveB - amount1Out;
@@ -378,7 +382,8 @@ contract Bonding is
     function buyWithAsset(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) public returns (bool) {
         uint256 currBal = IERC20(assetToken).balanceOf(msg.sender);
 
@@ -387,13 +392,14 @@ contract Bonding is
         // Transfer assetToken to Bonding contract from user
         IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        return buy(amountIn, tokenAddress, assetToken);
+        return buy(amountIn, tokenAddress, assetToken, amountOutMin);
     }
 
     function buy(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) private returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
@@ -415,6 +421,11 @@ contract Bonding is
             tokenAddress,
             assetToken,
             msg.sender
+        );
+
+        require(
+            amount0Out >= amountOutMin,
+            "Insufficient output amount"
         );
 
         uint256 newReserveA = reserveA - amount0Out;
@@ -462,7 +473,7 @@ contract Bonding is
     }
 
     /// @notice Buy a bonding token using SEI
-    function buyWithSei(address tokenAddress) public payable returns (bool) {
+    function buyWithSei(address tokenAddress, uint256 amountOutMin) public payable returns (bool) {
         require(msg.value > 0, "Must send SEI");
 
         // Step 1: Wrap SEI into WSEI
@@ -472,18 +483,18 @@ contract Bonding is
         wsei.approve(address(router), msg.value);
 
         // Step 3: Execute existing ERC-20 buy logic
-        return buy(msg.value, tokenAddress, address(wsei));
+        return buy(msg.value, tokenAddress, address(wsei), amountOutMin);
     }
 
     /// @notice Sell a bonding token and receive SEI
-    function sellForSei(uint256 amountIn, address tokenAddress) public nonReentrant returns (bool) {
+    function sellForSei(uint256 amountIn, address tokenAddress, uint256 amountOutMin) public nonReentrant returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
         // Step 1: Approve router to spend user's bonding token
         FERC20(tokenAddress).forceApprove(address(router), amountIn);
 
         // Step 2: Perform the sell (sends WSEI to this contract)
-        uint256 amountReceived = sell(amountIn, tokenAddress, address(wsei));
+        uint256 amountReceived = sell(amountIn, tokenAddress, address(wsei), amountOutMin);
 
         // Step 3: Unwrap WSEI and send SEI back to user
         wsei.withdraw(amountReceived);

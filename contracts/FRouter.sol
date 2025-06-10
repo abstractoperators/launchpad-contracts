@@ -166,7 +166,7 @@ contract FRouter is
         require(syntheticReserve > 0, "Reserve should be greater than 0");
 
         uint256 targetTokenBalance = (tokenBalance * assetBalance) / syntheticReserve;
-        require(tokenBalance >= targetTokenBalance, "Not enough balance to support target withdrawal");
+        // require(tokenBalance >= targetTokenBalance, "Not enough balance to support target withdrawal");
 
         uint256 tokensToBurn = tokenBalance - targetTokenBalance;
 
