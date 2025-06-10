@@ -97,6 +97,7 @@ contract Bonding is
     
     receive() external payable {}
     
+    // Initializes the Bonding contract with the given parameters.
     function initialize(
         address factory_,
         address router_,
@@ -198,7 +199,7 @@ contract Bonding is
         return _profile.tokens;
     }
 
-    // Handles the transfer of tokens from user to itself, as well as fees, then launches the token
+    // Method for launching a new token, using another ERC20 token as the paired token in the pool.
     function launchWithAsset(
         string memory _name,
         string memory _ticker,
@@ -296,6 +297,9 @@ contract Bonding is
         return (address(token), _pair, n);
     }
 
+=======
+    // Sells the given token (at tokenAddress) in exchange for assetToken.
+    // This token must have been launched using assetToken.
     function sellForAsset(
         uint256 amountIn,
         address tokenAddress,
@@ -348,6 +352,7 @@ contract Bonding is
         uint256 liquidity = newReserveB * 2;
         uint256 mCap = (tokenInfo[tokenAddress].data.supply * newReserveB) /
             newReserveA;
+
         uint256 price = newReserveA / newReserveB;
         uint256 volume = duration > 86400
             ? amount1Out
@@ -371,6 +376,10 @@ contract Bonding is
 
         return _amountReceived;
     }
+
+
+    // Buys the given token (at tokenAddress) in exchange for assetToken.
+    // This token must have been launched using assetToken.
 
     // Transfers asset tokens from user to this contract, then executes the buy
     function buyWithAsset(
@@ -506,6 +515,13 @@ contract Bonding is
         // Step 2: Execute existing ERC-20 launch logic
         return _launch(_name, _ticker, address(wsei), initialPurchase, seiLaunchFee);       
     }
+
+
+    // Helper function that is called when the token hits its graduation threshold.
+    // 1. Pulls liquidity from the currently deployed pool
+    // 2. Creates a new pool on Dragonswap
+    // 3. Deposits all the assetToken as well as a proportionate amount of token from the pool so that price remains the same on Dragonswap
+    // 4. Burns the remaining token that was not deposited in the pool.
 
     function _graduateToken(address tokenAddress, address assetToken) private {
         Token storage _token = tokenInfo[tokenAddress];

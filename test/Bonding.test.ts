@@ -1,3 +1,4 @@
+
 import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { Contract, Interface, Signer } from "ethers";
@@ -27,6 +28,7 @@ describe("Bonding Contract", function () {
 
     let GraduatedToken: string, AssetTradedToken: string, AssetTradedPair: string
 
+
     before(async function () {
         [owner, user, feeRecipient] = await ethers.getSigners();
 
@@ -54,6 +56,7 @@ describe("Bonding Contract", function () {
 
         // Deploy Factory contract
         const FFactory = await ethers.getContractFactory("FFactory");
+
         const multiplier = 5000
         Factory = await upgrades.deployProxy(FFactory, [await feeRecipient.getAddress(), 5, 5, multiplier], { initializer: "initialize" });
         await Factory.waitForDeployment();
@@ -68,7 +71,6 @@ describe("Bonding Contract", function () {
 
         DragonswapRouter = await ethers.getContractAt("IDragonswapRouter", dragonswapRouter);
         DragonswapFactory = await ethers.getContractAt("IDragonswapFactory", dragonswapFactory);
-
 
         // Define Roles
         const CREATOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("CREATOR_ROLE"));
@@ -91,6 +93,7 @@ describe("Bonding Contract", function () {
         const initialSupply = ethers.parseEther("100000")
         const gradThreshold = ethers.parseEther("25000")
         const maxTx = 20
+
         // Initialize Bonding contract
         await Bonding.initialize(
             Factory.target,   // factory address
@@ -102,6 +105,7 @@ describe("Bonding Contract", function () {
             maxTx, // maximum percentage of each token that can be bought in one tx.
             gradThreshold, // sei grad threshold
             gradThreshold, // asset grad threshold
+
             100, // Sets the dragonswap tax bps (100 is 1%)
             dragonswapFactory,
             dragonswapRouter
@@ -132,6 +136,7 @@ describe("Bonding Contract", function () {
         expect(await Bonding.maxTx()).to.equal("100");
     });
 
+
     it("should create a trading pair", async function () {
         // Create a test ERC20 token
         const TestToken = await ethers.getContractFactory("FERC20");
@@ -149,6 +154,7 @@ describe("Bonding Contract", function () {
         const pairAddress = await Factory.getPair(testToken.target, AssetToken.target);
         expect(pairAddress).to.properAddress;
     });
+
 
     it("should allow user to launch a token", async function () {
         // Send some token from owner to user
@@ -232,9 +238,11 @@ describe("Bonding Contract", function () {
             AssetToken.target
         );
 
+
         await tx.wait();
 
         const tokenAddress = (await Bonding.tokenInfos(1)) as string;
+
         expect(tokenAddress).to.be.properAddress;
 
         const tokenContract = await ethers.getContractAt("FERC20", tokenAddress);
@@ -246,6 +254,7 @@ describe("Bonding Contract", function () {
         await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("50"));
 
         // Buy token
+
         await Bonding.connect(user).buyWithAsset(ethers.parseEther("50"), tokenAddress, AssetToken.target);
         let newTokenBal = await tokenContract.balanceOf(await user.getAddress())
         expect(newTokenBal).to.be.gt(0);
@@ -255,7 +264,9 @@ describe("Bonding Contract", function () {
         // Approve more tokens for transfer
         await AssetToken.connect(user).approve(Bonding.target, ethers.parseEther("50"));
         await Bonding.connect(user).buyWithAsset(ethers.parseEther("50"), tokenAddress, AssetToken.target);
+
         const oldTokenBal = newTokenBal
+
         newTokenBal = await tokenContract.balanceOf(await user.getAddress())
         const tokensReceivedSecond = newTokenBal - oldTokenBal
         // The number of tokens received from this second sale should be less than the first sale.

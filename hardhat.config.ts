@@ -4,6 +4,7 @@ import "@openzeppelin/hardhat-upgrades";
 import "@nomicfoundation/hardhat-ignition-ethers";
 const { vars }  = require("hardhat/config");
 const PRIVATE_KEY = vars.get("PRIVATE_KEY");
+
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.28",
@@ -29,5 +30,6 @@ const config: HardhatUserConfig = {
     }
   }
 }
+
 
 export default config;

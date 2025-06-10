@@ -145,3 +145,4 @@ contract FPair is IFPair, ReentrancyGuard {
         amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
     }
 }
+
