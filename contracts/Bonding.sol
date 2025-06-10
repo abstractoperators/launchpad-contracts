@@ -71,14 +71,6 @@ contract Bonding is
         uint256 lastUpdated;
     }
 
-    struct DeployParams {
-        bytes32 tbaSalt;
-        address tbaImplementation;
-        uint32 daoVotingPeriod;
-        uint256 daoThreshold;
-    }
-
-    DeployParams private _deployParams;
 
     mapping(address => Profile) public profile;
     address[] public profiles;
@@ -185,9 +177,6 @@ contract Bonding is
         maxTx = maxTx_;
     }
 
-    function setDeployParams(DeployParams memory params) public onlyOwner {
-        _deployParams = params;
-    }
 
     function getUserTokens(
         address account
@@ -297,7 +286,6 @@ contract Bonding is
         return (address(token), _pair, n);
     }
 
-=======
     // Sells the given token (at tokenAddress) in exchange for assetToken.
     // This token must have been launched using assetToken.
     function sellForAsset(
