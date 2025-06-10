@@ -9,13 +9,13 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
     uint256 public maxTx; // The maximum percentage of the token that can be bought at once
     uint256 private _maxTxAmount; // The maximum amount of token that can be bought at once, derived from maxTx
     mapping(address => bool) private isExcludedFromMaxTx;
+    mapping(address => bool) public isIncludedInTax;
 
-    address public dragonSwapPool;
     address public taxReceiver;
     uint256 public taxBasisPoints; // 100 = 1%, 1000 = 10%, etc.
 
     event MaxTxUpdated(uint256 _maxTx);
-    event TaxSettingsUpdated(address pool, address receiver, uint256 bps);
+    event TaxSettingsUpdated(address receiver, uint256 bps);
     
     constructor(
         string memory name_,
@@ -44,17 +44,19 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
         isExcludedFromMaxTx[user] = true;
     }
 
+    function setIsIncludedInTax(address addr) public onlyOwner {
+        isIncludedInTax[addr] = true;
+    }
+
     function updateTaxSettings(
-        address _pool,
         address _receiver,
         uint256 _taxBps
     ) external onlyOwner {
         require(_receiver != address(0), "ERC20: zero tax address");
         require(_taxBps <= 1000, "ERC20: tax too high"); // max 10%
-        dragonSwapPool = _pool;
         taxReceiver = _receiver;
         taxBasisPoints = _taxBps;
-        emit TaxSettingsUpdated(_pool, _receiver, _taxBps);
+        emit TaxSettingsUpdated(_receiver, _taxBps);
     }
 
     function transfer(address recipient, uint256 amount) public override returns (bool) {
@@ -86,7 +88,7 @@ contract FERC20 is ERC20, ERC20Burnable, Ownable {
     function _transferWithTax(address from, address to, uint256 amount) internal {
         if (
             taxBasisPoints > 0 &&
-            (from == dragonSwapPool || to == dragonSwapPool) &&
+            (isIncludedInTax[from] || isIncludedInTax[to]) &&
             from != taxReceiver &&
             to != taxReceiver
         ) {

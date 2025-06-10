@@ -559,7 +559,8 @@ contract Bonding is
         _token.pair = dragonswapPair;
 
         address taxVault = factory.taxVault();
-        FERC20(tokenAddress).updateTaxSettings(dragonswapPair, taxVault, dragonswapTaxBps);
+        FERC20(tokenAddress).updateTaxSettings(taxVault, dragonswapTaxBps);
+        FERC20(tokenAddress).setIsIncludedInTax(dragonswapPair);
 
         emit Graduated(tokenAddress, dragonswapPair);
     }
