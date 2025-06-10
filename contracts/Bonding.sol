@@ -12,7 +12,6 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "./interfaces/IDragonswapFactory.sol";
 import "./interfaces/IDragonswapRouter.sol";
 
-import "hardhat/console.sol";
 
 import "./FFactory.sol";
 import "./IFPair.sol";
@@ -77,6 +76,8 @@ contract Bonding is
 
     mapping(address => Token) public tokenInfo;
     address[] public tokenInfos;
+
+    uint256 public graduationSlippage = 5; // 5% slippage default
 
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
@@ -175,6 +176,10 @@ contract Bonding is
 
     function setMaxTx(uint256 maxTx_) public onlyOwner {
         maxTx = maxTx_;
+    }
+
+    function setGraduationSlippage(uint256 slippage_) public onlyOwner {
+        graduationSlippage = slippage_;
     }
 
 
@@ -534,7 +539,7 @@ contract Bonding is
             dragonswapAsset = dragonswapRouter.WSEI();
             wsei.withdraw(assetAmount);
             // addLiquidity automatically creates the pool if it doesn't exist
-            dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, 0, 0, address(this), block.timestamp + 600);
+            dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, tokenAmount * (100-graduationSlippage) / 100, assetAmount * (100-graduationSlippage) / 100, address(this), block.timestamp + 600);
         } else {
             dragonswapAsset = assetToken;
             // Add liquidity to DragonSwap. This sends an NFT back to this contract that we have to lock up somehow.
@@ -543,8 +548,8 @@ contract Bonding is
                 dragonswapAsset,
                 tokenAmount,
                 assetAmount,
-                0, // slippage min
-                0,
+                tokenAmount * (100-graduationSlippage) / 100, // slippage min
+                assetAmount * (100-graduationSlippage) / 100,
                 address(this),
                 block.timestamp + 600
             );
