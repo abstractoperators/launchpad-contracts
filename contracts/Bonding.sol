@@ -77,7 +77,7 @@ contract Bonding is
     mapping(address => Token) public tokenInfo;
     address[] public tokenInfos;
 
-    uint256 public graduationSlippage = 5; // 5% slippage default
+    uint256 public graduationSlippage; // 5% slippage default
 
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
@@ -99,6 +99,7 @@ contract Bonding is
         uint256 seiLaunchFee_,
         uint256 initialSupply_,
         uint256 maxTx_,
+        uint256 graduationSlippage_,
         uint256 seiGradThreshold_,
         uint256 assetGradThreshold_,
         uint256 dragonswapTaxBps_,
@@ -117,6 +118,7 @@ contract Bonding is
 
         initialSupply = initialSupply_;
         maxTx = maxTx_;
+        graduationSlippage = graduationSlippage_;
 
         seiGradThreshold = seiGradThreshold_;
         assetGradThreshold = assetGradThreshold_;
