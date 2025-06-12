@@ -12,7 +12,6 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "./interfaces/IDragonswapFactory.sol";
 import "./interfaces/IDragonswapRouter.sol";
 
-import "hardhat/console.sol";
 
 import "./FFactory.sol";
 import "./IFPair.sol";
@@ -71,20 +70,14 @@ contract Bonding is
         uint256 lastUpdated;
     }
 
-    struct DeployParams {
-        bytes32 tbaSalt;
-        address tbaImplementation;
-        uint32 daoVotingPeriod;
-        uint256 daoThreshold;
-    }
-
-    DeployParams private _deployParams;
 
     mapping(address => Profile) public profile;
     address[] public profiles;
 
     mapping(address => Token) public tokenInfo;
     address[] public tokenInfos;
+
+    uint256 public graduationSlippage = 5; // 5% slippage default
 
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
@@ -185,9 +178,10 @@ contract Bonding is
         maxTx = maxTx_;
     }
 
-    function setDeployParams(DeployParams memory params) public onlyOwner {
-        _deployParams = params;
+    function setGraduationSlippage(uint256 slippage_) public onlyOwner {
+        graduationSlippage = slippage_;
     }
+
 
     function getUserTokens(
         address account
@@ -291,28 +285,29 @@ contract Bonding is
 
         // Make initial purchase
         if (initialPurchase > 0) {
-            buy(initialPurchase, address(token), assetToken);
+            buy(initialPurchase, address(token), assetToken, 0);
         }
 
         return (address(token), _pair, n);
     }
 
-=======
     // Sells the given token (at tokenAddress) in exchange for assetToken.
     // This token must have been launched using assetToken.
     function sellForAsset(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) public returns (uint256 amountReceived) {
         require(assetToken != address(wsei), "Call sellForSei for dealing with wsei");
-        return sell(amountIn, tokenAddress, assetToken);
+        return sell(amountIn, tokenAddress, assetToken, amountOutMin);
     }
 
     function sell(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) private returns (uint256 amountReceived) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
@@ -343,6 +338,8 @@ contract Bonding is
             assetToken,
             recipient
         );
+
+        require(_amountReceived >= amountOutMin, "Insufficient output amount");
 
         uint256 newReserveA = reserveA + amount0In;
         uint256 newReserveB = reserveB - amount1Out;
@@ -385,7 +382,8 @@ contract Bonding is
     function buyWithAsset(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) public returns (bool) {
         uint256 currBal = IERC20(assetToken).balanceOf(msg.sender);
 
@@ -394,13 +392,14 @@ contract Bonding is
         // Transfer assetToken to Bonding contract from user
         IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        return buy(amountIn, tokenAddress, assetToken);
+        return buy(amountIn, tokenAddress, assetToken, amountOutMin);
     }
 
     function buy(
         uint256 amountIn,
         address tokenAddress,
-        address assetToken
+        address assetToken,
+        uint256 amountOutMin
     ) private returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
@@ -414,14 +413,22 @@ contract Bonding is
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
 
         // Approve router to spend asset token on behalf of Bonding
-        IERC20(assetToken).approve(address(router), 0);
-        IERC20(assetToken).approve(address(router), amountIn);
-
+        SafeERC20.forceApprove(
+            IERC20(assetToken),
+            address(router),
+            amountIn
+        );
+        
         (uint256 amount1In, uint256 amount0Out) = router.buy(
             amountIn,
             tokenAddress,
             assetToken,
             msg.sender
+        );
+
+        require(
+            amount0Out >= amountOutMin,
+            "Insufficient output amount"
         );
 
         uint256 newReserveA = reserveA - amount0Out;
@@ -469,7 +476,7 @@ contract Bonding is
     }
 
     /// @notice Buy a bonding token using SEI
-    function buyWithSei(address tokenAddress) public payable returns (bool) {
+    function buyWithSei(address tokenAddress, uint256 amountOutMin) public payable returns (bool) {
         require(msg.value > 0, "Must send SEI");
 
         // Step 1: Wrap SEI into WSEI
@@ -479,18 +486,18 @@ contract Bonding is
         wsei.approve(address(router), msg.value);
 
         // Step 3: Execute existing ERC-20 buy logic
-        return buy(msg.value, tokenAddress, address(wsei));
+        return buy(msg.value, tokenAddress, address(wsei), amountOutMin);
     }
 
     /// @notice Sell a bonding token and receive SEI
-    function sellForSei(uint256 amountIn, address tokenAddress) public nonReentrant returns (bool) {
+    function sellForSei(uint256 amountIn, address tokenAddress, uint256 amountOutMin) public nonReentrant returns (bool) {
         require(tokenInfo[tokenAddress].trading, "Token not trading");
 
         // Step 1: Approve router to spend user's bonding token
         FERC20(tokenAddress).forceApprove(address(router), amountIn);
 
         // Step 2: Perform the sell (sends WSEI to this contract)
-        uint256 amountReceived = sell(amountIn, tokenAddress, address(wsei));
+        uint256 amountReceived = sell(amountIn, tokenAddress, address(wsei), amountOutMin);
 
         // Step 3: Unwrap WSEI and send SEI back to user
         wsei.withdraw(amountReceived);
@@ -537,8 +544,16 @@ contract Bonding is
         (uint256 tokenAmount, uint256 assetAmount) = router.graduatePool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
 
         // Approve router
-        IERC20(tokenAddress).approve(address(dragonswapRouter), tokenAmount);
-        IERC20(assetToken).approve(address(dragonswapRouter), assetAmount);
+        SafeERC20.forceApprove(
+            IERC20(tokenAddress),
+            address(dragonswapRouter),
+            tokenAmount
+        );
+        SafeERC20.forceApprove(
+            IERC20(assetToken),
+            address(dragonswapRouter),
+            assetAmount
+        );
 
         // If assetToken is sei, swap back for regular sei before depositing to pool
         address dragonswapAsset;
@@ -546,7 +561,7 @@ contract Bonding is
             dragonswapAsset = dragonswapRouter.WSEI();
             wsei.withdraw(assetAmount);
             // addLiquidity automatically creates the pool if it doesn't exist
-            dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, 0, 0, address(this), block.timestamp + 600);
+            dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, tokenAmount * (100-graduationSlippage) / 100, assetAmount * (100-graduationSlippage) / 100, address(this), block.timestamp + 600);
         } else {
             dragonswapAsset = assetToken;
             // Add liquidity to DragonSwap. This sends an NFT back to this contract that we have to lock up somehow.
@@ -555,8 +570,8 @@ contract Bonding is
                 dragonswapAsset,
                 tokenAmount,
                 assetAmount,
-                0, // slippage min
-                0,
+                tokenAmount * (100-graduationSlippage) / 100, // slippage min
+                assetAmount * (100-graduationSlippage) / 100,
                 address(this),
                 block.timestamp + 600
             );
@@ -566,7 +581,8 @@ contract Bonding is
         _token.pair = dragonswapPair;
 
         address taxVault = factory.taxVault();
-        FERC20(tokenAddress).updateTaxSettings(dragonswapPair, taxVault, dragonswapTaxBps);
+        FERC20(tokenAddress).updateTaxSettings(taxVault, dragonswapTaxBps);
+        FERC20(tokenAddress).setIsIncludedInTax(dragonswapPair);
 
         emit Graduated(tokenAddress, dragonswapPair);
     }

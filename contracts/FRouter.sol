@@ -7,8 +7,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
-import "hardhat/console.sol";
-
 import "./FFactory.sol";
 import "./IFPair.sol";
 
@@ -168,7 +166,7 @@ contract FRouter is
         require(syntheticReserve > 0, "Reserve should be greater than 0");
 
         uint256 targetTokenBalance = (tokenBalance * assetBalance) / syntheticReserve;
-        require(tokenBalance >= targetTokenBalance, "Not enough balance to support target withdrawal");
+        // require(tokenBalance >= targetTokenBalance, "Not enough balance to support target withdrawal");
 
         uint256 tokensToBurn = tokenBalance - targetTokenBalance;
 
