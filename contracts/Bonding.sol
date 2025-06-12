@@ -413,9 +413,12 @@ contract Bonding is
         (uint256 reserveA, uint256 reserveB) = pair.getReserves();
 
         // Approve router to spend asset token on behalf of Bonding
-        IERC20(assetToken).approve(address(router), 0);
-        IERC20(assetToken).approve(address(router), amountIn);
-
+        SafeERC20.forceApprove(
+            IERC20(assetToken),
+            address(router),
+            amountIn
+        );
+        
         (uint256 amount1In, uint256 amount0Out) = router.buy(
             amountIn,
             tokenAddress,
@@ -541,8 +544,16 @@ contract Bonding is
         (uint256 tokenAmount, uint256 assetAmount) = router.graduatePool(tokenAddress, assetToken); // Sends assetToken to Bonding contract
 
         // Approve router
-        IERC20(tokenAddress).approve(address(dragonswapRouter), tokenAmount);
-        IERC20(assetToken).approve(address(dragonswapRouter), assetAmount);
+        SafeERC20.forceApprove(
+            IERC20(tokenAddress),
+            address(dragonswapRouter),
+            tokenAmount
+        );
+        SafeERC20.forceApprove(
+            IERC20(assetToken),
+            address(dragonswapRouter),
+            assetAmount
+        );
 
         // If assetToken is sei, swap back for regular sei before depositing to pool
         address dragonswapAsset;
