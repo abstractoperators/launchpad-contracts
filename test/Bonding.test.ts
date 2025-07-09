@@ -16,8 +16,12 @@ const dragonSwapContracts: Record<string, DragonSwapAddresses> = {
         router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
     },
     "real_testnet": {
-        factory: "0xeE6Ad607238f8d2C63767245d78520F06c303D31",
+        factory: "0x71f6b49ae1558357bBb5A6074f1143c46cBcA03d",
         router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
+    },
+    "hardhat": {
+        factory: "0x71f6b49ae1558357bBb5A6074f1143c46cBcA03d",
+        router: "0xa4cF2F53D1195aDDdE9e4D3aCa54f556895712f2",
     },
 };
 
@@ -103,7 +107,6 @@ describe("Bonding Contract", function () {
             ethers.parseEther("100"),               // sei launch fee amount
             initialSupply, // initial supply
             maxTx, // maximum percentage of each token that can be bought in one tx.
-            5, //graduation Slippage
             gradThreshold, // sei grad threshold
             gradThreshold, // asset grad threshold
 
@@ -121,7 +124,7 @@ describe("Bonding Contract", function () {
         expect(await Bonding.router()).to.equal(Router.target);
     });
 
-    it("should allow owner to set initial supply and graduation threshold & slippage", async function () {
+    it("should allow owner to set initial supply and graduation threshold", async function () {
         await Bonding.setInitialSupply(ethers.parseEther("1000000000"));
         expect(await Bonding.initialSupply()).to.equal("1000000000000000000000000000");
 
@@ -130,9 +133,6 @@ describe("Bonding Contract", function () {
 
         await Bonding.setAssetGradThreshold(ethers.parseEther("100000"));
         expect(await Bonding.assetGradThreshold()).to.equal("100000000000000000000000");
-
-        await Bonding.setGraduationSlippage(4);
-        expect(await Bonding.graduationSlippage()).to.equal("4");
     });
 
     it("should allow owner to set max tx", async function () {
