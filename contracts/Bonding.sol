@@ -77,7 +77,6 @@ contract Bonding is
     mapping(address => Token) public tokenInfo;
     address[] public tokenInfos;
 
-
     event Launched(address indexed token, address indexed pair, uint);
     event Deployed(address indexed token, uint256 amount0, uint256 amount1);
     event Graduated(address indexed token, address indexed pair);
@@ -555,6 +554,7 @@ contract Bonding is
             wsei.withdraw(assetAmount);
             // addLiquidity automatically creates the pool if it doesn't exist
             dragonswapRouter.addLiquiditySEI{value: assetAmount}(tokenAddress, tokenAmount, tokenAmount, assetAmount, address(this), block.timestamp + 600);
+
         } else {
             dragonswapAsset = assetToken;
             // Add liquidity to DragonSwap. This sends an NFT back to this contract that we have to lock up somehow.
