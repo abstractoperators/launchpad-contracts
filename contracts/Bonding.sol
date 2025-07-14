@@ -119,7 +119,6 @@ contract Bonding is
         initialSupply = initialSupply_;
         maxTx = maxTx_;
         graduationSlippage = graduationSlippage_;
-
         seiGradThreshold = seiGradThreshold_;
         assetGradThreshold = assetGradThreshold_;
         dragonswapTaxBps = dragonswapTaxBps_;

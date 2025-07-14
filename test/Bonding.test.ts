@@ -16,8 +16,12 @@ const dragonSwapContracts: Record<string, DragonSwapAddresses> = {
         router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
     },
     "real_testnet": {
-        factory: "0xeE6Ad607238f8d2C63767245d78520F06c303D31",
+        factory: "0x71f6b49ae1558357bBb5A6074f1143c46cBcA03d",
         router: "0x527b42CA5e11370259EcaE68561C14dA415477C8",
+    },
+    "hardhat": {
+        factory: "0x71f6b49ae1558357bBb5A6074f1143c46cBcA03d",
+        router: "0xa4cF2F53D1195aDDdE9e4D3aCa54f556895712f2",
     },
 };
 
