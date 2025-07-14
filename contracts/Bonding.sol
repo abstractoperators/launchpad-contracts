@@ -183,6 +183,7 @@ contract Bonding is
         graduationSlippage = slippage_;
     }
 
+
     function getUserTokens(
         address account
     ) public view returns (address[] memory) {
@@ -570,7 +571,7 @@ contract Bonding is
                 dragonswapAsset,
                 tokenAmount,
                 assetAmount,
-                tokenAmount * (100-graduationSlippage) / 100, 
+                tokenAmount * (100-graduationSlippage) / 100, // slippage min
                 assetAmount * (100-graduationSlippage) / 100,
                 address(this),
                 block.timestamp + 600
